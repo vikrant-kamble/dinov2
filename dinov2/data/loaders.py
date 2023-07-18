@@ -11,7 +11,7 @@ from typing import Any, Callable, List, Optional, TypeVar
 import torch
 from torch.utils.data import Sampler
 
-from .datasets import ImageNet, ImageNet22k
+from .datasets import ImageNet, ImageNet22k, ImageNette
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
 
 
@@ -57,6 +57,10 @@ def _parse_dataset_str(dataset_str: str):
         class_ = ImageNet
         if "split" in kwargs:
             kwargs["split"] = ImageNet.Split[kwargs["split"]]
+    elif name == "ImageNette":
+        class_ = ImageNette
+        if "split" in kwargs:
+            kwargs["split"] = ImageNette.Split[kwargs["split"]]
     elif name == "ImageNet22k":
         class_ = ImageNet22k
     else:
