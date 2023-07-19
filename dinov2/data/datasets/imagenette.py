@@ -36,13 +36,25 @@ class _Split(Enum):
     def get_dirname(self, class_id: Optional[str] = None) -> str:
         return self.value if class_id is None else os.path.join(self.value, class_id)
 
-    def get_image_relpath(self, actual_index: int, class_id: Optional[str] = None) -> str:
+    def get_image_relpath(self, actual_index: int, class_id: Optional[str] = None, root: Optional[str] = None) -> str:
         dirname = self.get_dirname(class_id)
-        if self == _Split.TRAIN:
-            basename = f"{class_id}_{actual_index}"
-        else:  # self in (_Split.VAL, _Split.TEST):
-            basename = f"ILSVRC2012_{self.value}_{actual_index:08d}"
-        return os.path.join(dirname, basename + ".JPEG")
+
+        # Try the two patterns (since Imagenette does not respect the ImageNet convention
+        # of having training as {class_id}_{actual_index} and validation having 
+        # ILSVRC2012_{self.value}_{actual_index:08d})
+        basename = f"{class_id}_{actual_index}"
+        path = os.path.join(dirname, basename + ".JPEG")
+
+        if os.path.exists(os.path.join(root, path)):
+            return path
+        else:
+            basename2 = f"ILSVRC2012_{self.value}_{actual_index:08d}"
+            path2 = os.path.join(dirname, basename2 + ".JPEG")
+
+            if os.path.exists(os.path.join(root, path2)):
+                return path2
+            else:
+                raise IOError(f"{path} nor {path2} exist under {root}")
 
     def parse_image_relpath(self, image_relpath: str) -> Tuple[str, int]:
         assert self != _Split.TEST
@@ -68,6 +80,7 @@ class ImageNette(ExtendedVisionDataset):
         target_transform: Optional[Callable] = None,
     ) -> None:
         super().__init__(root, transforms, transform, target_transform)
+        self._root = root
         self._extra_root = extra
         self._split = split
 
@@ -139,7 +152,7 @@ class ImageNette(ExtendedVisionDataset):
 
         class_id = self.get_class_id(index)
 
-        image_relpath = self.split.get_image_relpath(actual_index, class_id)
+        image_relpath = self.split.get_image_relpath(actual_index, class_id, root=self._root)
         image_full_path = os.path.join(self.root, image_relpath)
         with open(image_full_path, mode="rb") as f:
             image_data = f.read()
