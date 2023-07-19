@@ -65,9 +65,9 @@ def get_slurm_partition(cluster_type: Optional[ClusterType] = None) -> Optional[
         return None
 
     SLURM_PARTITIONS = {
-        ClusterType.AWS: "a10",
-        ClusterType.FAIR: "a10",
-        ClusterType.RSC: "a10",
+        ClusterType.AWS: "t4",
+        ClusterType.FAIR: "t4",
+        ClusterType.RSC: "t4",
     }
     return SLURM_PARTITIONS[cluster_type]
 

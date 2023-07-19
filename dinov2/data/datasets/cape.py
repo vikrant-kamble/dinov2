@@ -24,26 +24,28 @@ class _Split(Enum):
     VAL = "val"
     TEST = "test"  # NOTE: torchvision does not support the test split
 
-
     @property
     def length(self) -> int:
         split_lengths = {
-            _Split.TRAIN: 1_281_167,
-            _Split.VAL: 50_000,
-            _Split.TEST: 100_000,
+            _Split.TRAIN: 9103,
+            _Split.VAL: 3925,
+            _Split.TEST: 3925,
         }
         return split_lengths[self]
 
     def get_dirname(self, class_id: Optional[str] = None) -> str:
         return self.value if class_id is None else os.path.join(self.value, class_id)
 
-    def get_image_relpath(self, actual_index: int, class_id: Optional[str] = None) -> str:
+    def get_image_relpath(self, actual_index: int, class_id: Optional[str] = None, root: Optional[str] = None) -> str:
         dirname = self.get_dirname(class_id)
-        if self == _Split.TRAIN:
-            basename = f"{class_id}_{actual_index}"
-        else:  # self in (_Split.VAL, _Split.TEST):
-            basename = f"ILSVRC2012_{self.value}_{actual_index:08d}"
-        return os.path.join(dirname, basename + ".JPEG")
+
+        basename = f"{class_id}_{actual_index}"
+        path = os.path.join(dirname, basename + ".png")
+
+        if os.path.exists(os.path.join(root, path)):
+            return path
+        else:
+            raise IOError(f"{path} does not exist under {root}")
 
     def parse_image_relpath(self, image_relpath: str) -> Tuple[str, int]:
         assert self != _Split.TEST
@@ -54,14 +56,14 @@ class _Split(Enum):
         return class_id, actual_index
 
 
-class ImageNet(ExtendedVisionDataset):
+class Cape(ExtendedVisionDataset):
     Target = Union[_Target]
     Split = Union[_Split]
 
     def __init__(
         self,
         *,
-        split: "ImageNet.Split",
+        split: "Cape.Split",
         root: str,
         extra: str,
         transforms: Optional[Callable] = None,
@@ -69,6 +71,7 @@ class ImageNet(ExtendedVisionDataset):
         target_transform: Optional[Callable] = None,
     ) -> None:
         super().__init__(root, transforms, transform, target_transform)
+        self._root = root
         self._extra_root = extra
         self._split = split
 
@@ -77,7 +80,7 @@ class ImageNet(ExtendedVisionDataset):
         self._class_names = None
 
     @property
-    def split(self) -> "ImageNet.Split":
+    def split(self) -> "Cape.Split":
         return self._split
 
     def _get_extra_full_path(self, extra_path: str) -> str:
@@ -140,7 +143,7 @@ class ImageNet(ExtendedVisionDataset):
 
         class_id = self.get_class_id(index)
 
-        image_relpath = self.split.get_image_relpath(actual_index, class_id)
+        image_relpath = self.split.get_image_relpath(actual_index, class_id, root=self._root)
         image_full_path = os.path.join(self.root, image_relpath)
         with open(image_full_path, mode="rb") as f:
             image_data = f.read()
@@ -167,7 +170,7 @@ class ImageNet(ExtendedVisionDataset):
 
     def __len__(self) -> int:
         entries = self._get_entries()
-        # assert len(entries) == self.split.length
+        # assert len(entries) == self.split.length, f"{len(entries)} vs {self.split.length}"
         return len(entries)
 
     def _load_labels(self, labels_path: str) -> List[Tuple[str, str]]:
@@ -187,7 +190,7 @@ class ImageNet(ExtendedVisionDataset):
 
     def _dump_entries(self) -> None:
         split = self.split
-        if split == ImageNet.Split.TEST:
+        if split == Cape.Split.TEST:
             dataset = None
             sample_count = split.length
             max_class_id_length, max_class_name_length = 0, 0
@@ -219,7 +222,7 @@ class ImageNet(ExtendedVisionDataset):
         )
         entries_array = np.empty(sample_count, dtype=dtype)
 
-        if split == ImageNet.Split.TEST:
+        if split == Cape.Split.TEST:
             old_percent = -1
             for index in range(sample_count):
                 percent = 100 * (index + 1) // sample_count
@@ -253,7 +256,7 @@ class ImageNet(ExtendedVisionDataset):
 
     def _dump_class_ids_and_names(self) -> None:
         split = self.split
-        if split == ImageNet.Split.TEST:
+        if split == Cape.Split.TEST:
             return
 
         entries_array = self._load_extra(self._entries_path)
