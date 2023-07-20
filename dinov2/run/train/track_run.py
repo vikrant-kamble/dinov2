@@ -32,13 +32,23 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# Disable annoying warnings from Neptune
+logging.getLogger("neptune.internal.operation_processors.async_operation_processor").setLevel(logging.CRITICAL)
+
+
+
 def upload_to_neptune(run_id: str, filepath: Path):
 
     # Make sure the project is set
     assert os.environ.get('NEPTUNE_PROJECT') is not None, "You have to set the NEPTUNE_PROJECT environment variable"
         
     # Try to fetch the run if it exist
-    with neptune.init_run(custom_run_id=run_id) as run:
+    with neptune.init_run(
+        custom_run_id=run_id,
+        capture_stdout=False,
+        capture_stderr=False,
+        capture_hardware_metrics=False
+        ) as run:
 
         with open(filepath, "r") as f:
             lines = [json.loads(x) for x in f.readlines()]
@@ -48,7 +58,7 @@ def upload_to_neptune(run_id: str, filepath: Path):
                 if k in ['iteration', 'iter_time', 'data_time']:
                     continue
                 else:
-                    run[k].append(value=v, step=int(line['iteration']))
+                    run[k].append(value=v, step=int(line['iteration'])+1)
 
 
 if __name__ == "__main__":
