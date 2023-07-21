@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """
 Reads the training_metrics.json file and upload the metrics to Neptune.ai.
 

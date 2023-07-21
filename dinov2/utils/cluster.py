@@ -65,9 +65,9 @@ def get_slurm_partition(cluster_type: Optional[ClusterType] = None) -> Optional[
         return None
 
     SLURM_PARTITIONS = {
-        ClusterType.AWS: "t4",
-        ClusterType.FAIR: "t4",
-        ClusterType.RSC: "t4",
+        ClusterType.AWS: os.environ.get("SLURM_PARTITION", "t4"),
+        ClusterType.FAIR: os.environ.get("SLURM_PARTITION", "t4"),
+        ClusterType.RSC: os.environ.get("SLURM_PARTITION", "t4")
     }
     return SLURM_PARTITIONS[cluster_type]
 
