@@ -13,7 +13,7 @@ import torch.backends.cudnn as cudnn
 from dinov2.models import build_model_from_cfg
 from dinov2.utils.config import setup
 import dinov2.utils.utils as dinov2_utils
-
+from dinov2.models.cape_backbone import CapeBackbone
 
 def get_args_parser(
     description: Optional[str] = None,
@@ -74,3 +74,14 @@ def setup_and_build_model(args) -> Tuple[Any, torch.dtype]:
     model = build_model_for_eval(config, args.pretrained_weights)
     autocast_dtype = get_autocast_dtype(config)
     return model, autocast_dtype
+
+def setup_and_build_efficientnet_model(args) -> Tuple[Any, torch.dtype]:
+    cudnn.benchmark = True
+    config = setup(args)
+    model_name = "efficientnet-b2"
+    add_pooling = True
+    container = CapeBackbone(model_name, pretrained=True, in_channels=3)
+    model = container.get_features(add_pooling, args.pretrained_weights)
+    model = model.eval()
+    model.cuda()
+    return model, torch.half

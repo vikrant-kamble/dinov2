@@ -182,7 +182,6 @@ def create_linear_input(x_tokens_list, use_n_blocks, use_avgpool):
         output = output.reshape(output.shape[0], -1)
     return output.float()
 
-
 class LinearClassifier(nn.Module):
     """Linear layer to train on top of frozen features"""
 
