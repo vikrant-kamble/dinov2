@@ -1,0 +1,14 @@
+Train:
+
+SLURM_PARTITION=a10 python /home/ec2-user/dinov2/dinov2/run/train/train.py --nodes 2 --ngpus 4  --config-file /home/ec2-user/dinov2/dinov2/configs/train/vitl16_short.yaml --output-dir ~/30epochs train.dataset_path=Cape:split=TRAIN:root=/home/ec2-user/mtmv_livarea_garages_dinov2_imagenet:extra=/home/ec2-user/mtmv_livarea_garages_dinov2_imagenet train.batch_size_per_gpu=32 optim.base_lr=0.002 optim.epochs=30
+
+Track
+
+conda activate neptune
+nohup watch -n 180 python dinov2/dinov2/run/train/track_run.py --run_id 83 --filepath /home/ec2-user/30epochs/training_metrics.json &
+
+
+Eval:
+
+do SLURM_PARITION=t4 python /home/ec2-user/dinov2/dinov2/run/eval/knn.py --config-file ~/lr001/config.yaml --pretrained-weights ~/lr001/eval/${chk}/teacher_checkpoint.pth --output-dir ~/lr001/eval/${chk}/knn_rg --train-dataset Cape:split=TRAIN:root=/home/ec2-user/rg_evaluation_imagenet:extra=/home/ec2-user/rg_evaluation_imagenet --val-dataset Cape:split=VAL:root=/home/ec2-user/rg_evaluation_imagenet:extra=/home/ec2-user/rg_evaluation_imagenet --nodes 2 --ngpus 1; done
+
