@@ -5,7 +5,7 @@ SLURM_PARTITION=a10 python /home/ec2-user/dinov2/dinov2/run/train/train.py --nod
 Track
 
 conda activate neptune
-nohup watch -n 180 python dinov2/dinov2/run/train/track_run.py --run_id 83 --filepath /home/ec2-user/30epochs/training_metrics.json &
+nohup watch -n 180 python /home/ec2-user/dinov2/dinov2/run/train/track_run.py --run_id 83 --filepath /home/ec2-user/30epochs/training_metrics.json &
 
 
 Eval:

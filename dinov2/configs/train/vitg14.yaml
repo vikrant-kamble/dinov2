@@ -8,6 +8,7 @@ train:
   batch_size_per_gpu: 12
   dataset_path: ImageNet22k
   centering: sinkhorn_knopp
+  pretrained_weights: "/home/ec2-user/dinov2/weights/dinov2_vitg14_pretrain.pth"  # Added by GV
 student:
   arch: vit_giant2
   patch_size: 14
@@ -23,4 +24,5 @@ optim:
   warmup_epochs: 80
   layerwise_decay: 1.0
 crops:
+  global_crops_size: 518 # Added by GV to match the eval config and the pretrained weights
   local_crops_size: 98
