@@ -8,11 +8,13 @@ train:
   batch_size_per_gpu: 32
   dataset_path: ImageNet22k
   centering: sinkhorn_knopp
+  pretrained_weights: "/home/ec2-user/dinov2/weights/dinov2_vitl14_pretrain.pth"  # Added by GV
 student:
   arch: vit_large
   patch_size: 14
   drop_path_rate: 0.4
-  ffn_layer: swiglufused
+  # ffn_layer: swiglufused
+  ffn_layer: "mlp"  # Changed by GV to match the weights
   block_chunks: 4
 teacher:
   momentum_teacher: 0.994
@@ -23,5 +25,5 @@ optim:
   warmup_epochs: 80
   layerwise_decay: 1.0
 crops:
-  global_crops_size: 518  # this is to set up the position embeddings properly
+  global_crops_size: 518  # Added by GV to match the pretrained weights
   local_crops_size: 98

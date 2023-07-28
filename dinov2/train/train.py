@@ -296,7 +296,7 @@ def do_train(cfg, model, resume=False):
 
 
 # Added by GV
-def custom_weight_loader(model, pretrained_weights):
+def custom_weight_loader_g(model, pretrained_weights):
 
     logger.info(f"Initializing model from pretrained weights {pretrained_weights}")
 
@@ -321,21 +321,79 @@ def custom_weight_loader(model, pretrained_weights):
     # NOTE: the Dino and the iBot heads will NOT be overwritten
     # so they will stay randomly initialized
     model.student.load_state_dict(state_dict, strict=False)
-    model.teacher.load_state_dict(state_dict, strict=False)
+
+    # NOTE: the teacher will be updated with the student weights later
+    # on, so no need to do it here
 
     return model
 
-    
+
+def custom_weight_loader_l(model, pretrained_weights):
+
+    logger.info(f"Initializing model from pretrained weights {pretrained_weights}")
+
+    state_dict = torch.load(pretrained_weights, map_location="cpu")
+
+    # Remap the state dict to match the model
+    def group_weights(k):
+
+        if "blocks" in k:
+            # Name is something like blocks.17.ls1.gamma
+            tokens = k.split(".")
+            n = int(tokens[1])
+
+            block = n // 6
+
+            name = f"backbone.blocks.{block}.{n}.{'.'.join(tokens[2:])}"
+
+            if "mlp.fc1" in k:
+
+                return name.replace("fc1", "w12")
+            
+            elif "mlp.fc2" in k:
+
+                return name.replace("fc2", "w3")
+            
+            else:
+
+                return name
+
+        else:
+            
+            return f"backbone.{k}"
+
+    state_dict = {group_weights(k): v for k, v in state_dict.items()}
+            
+    # NOTE: the Dino and the iBot heads will NOT be overwritten
+    # so they will stay randomly initialized
+    model.student.load_state_dict(state_dict, strict=False)
+
+    # NOTE: the teacher will be updated with the student weights later
+    # on, so no need to do it here
+
+    return model
 
 
 def main(args):
     
     cfg = setup(args)
 
-    model = custom_weight_loader(
-        SSLMetaArch(cfg),
-        pretrained_weights=cfg.train.pretrained_weights,
-    ).to(torch.device("cuda"))
+    try:
+        _ = cfg.train.pretrained_weights
+    except KeyError:
+        model = SSLMetaArch(cfg).to(torch.device("cuda"))
+    else:
+        if cfg.student.arch == "vit_large":
+            custom_weight_loader = custom_weight_loader_l
+        elif cfg.student.arch == "vit_base":
+            custom_weight_loader = custom_weight_loader_g
+        else:
+            raise ValueError(f"No custom weight loader for architcture {cfg.student.arch}")
+
+        model = custom_weight_loader(
+            SSLMetaArch(cfg),
+            pretrained_weights=cfg.train.pretrained_weights,
+        ).to(torch.device("cuda"))
 
     model.prepare_for_distributed_training()
 
