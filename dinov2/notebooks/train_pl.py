@@ -7,6 +7,7 @@ from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import NeptuneLogger
+from pytorch_lightning.callbacks import LearningRateMonitor
 import torchmetrics
 
 import sys
@@ -97,14 +98,8 @@ class ImageClassifier(pl.LightningModule):
         x, y = batch
         y_hat = self(x)
         loss = nn.functional.cross_entropy(y_hat, y)
-        self.log('train_loss', loss, sync_dist=True)
         self.training_loss.append(loss)
         return loss
-    
-    def on_training_epoch_end(self):
-        avg_loss = torch.stack(self.training_loss).mean()
-        self.log('train_loss', avg_loss, prog_bar=True, sync_dist=True)
-        self.training_loss.clear()
     
     def validation_step(self, batch, batch_idx):
         x, y = batch
@@ -118,11 +113,19 @@ class ImageClassifier(pl.LightningModule):
         return {'loss': loss, 'acc': acc}
     
     def on_validation_epoch_end(self):
-        avg_loss = torch.stack(self.valid_loss).mean()
+        avg_loss_val = torch.stack(self.valid_loss).mean()
         avg_acc = torch.stack(self.valid_acc).mean()
-        self.log('val_loss', avg_loss, prog_bar=True, sync_dist=True)
+        
+        self.log('val_loss', avg_loss_val, prog_bar=True, sync_dist=True)
         self.log('val_acc', avg_acc, prog_bar=True, sync_dist=True)
         
+        if self.training_loss:
+            avg_loss_train = torch.stack(self.training_loss).mean()
+            self.log('train_loss', avg_loss_train, prog_bar=True, sync_dist=True)
+        else:
+            print("No training loss")
+        
+        self.training_loss.clear()
         self.valid_loss.clear()
         self.valid_acc.clear()
 
@@ -133,7 +136,7 @@ class ImageClassifier(pl.LightningModule):
 #             optimizer, max_lr=1e-3, total_steps=self.trainer.estimated_stepping_batches
 #         )
         
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.7)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.98)
         return {"optimizer": optimizer, "lr_scheduler": scheduler}
 
     
@@ -147,8 +150,17 @@ if __name__ == "__main__":
         api_key = os.getenv("NEPTUNE_API_TOKEN"),
         project = os.environ.get('NEPTUNE_PROJECT'),
         tags = ['mlp', 'giacomo'],
-#         mode="offline"
+        log_model_checkpoints=False  # otherwise Neptune saves _every_ checkpoint for a total of 100 Gb
     )
     
-    trainer = pl.Trainer(max_epochs=10, accelerator="gpu", devices=4, log_every_n_steps=10, logger=neptune_logger)
+    lr_monitor = LearningRateMonitor(logging_interval='epoch')
+    
+    trainer = pl.Trainer(
+        max_epochs=100, 
+        accelerator="gpu", 
+        devices=4, 
+        log_every_n_steps=10, 
+        logger=neptune_logger,
+        callbacks=[lr_monitor]
+    )
     trainer.fit(classifier_model, datamodule=data_module)
