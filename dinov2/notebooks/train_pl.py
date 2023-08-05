@@ -14,8 +14,8 @@ sys.path.append("/cnvrg/")
 
 from omegaconf import OmegaConf
 from dinov2.configs import dinov2_default_config
-
 from dinov2.eval.setup import build_model_for_eval
+from dinov2.eval.linear import create_linear_input
 
 default_cfg = OmegaConf.create(dinov2_default_config)
 cfg = OmegaConf.load("30epochswd01_config.yaml")
@@ -65,23 +65,39 @@ class ImageClassifier(pl.LightningModule):
         for param in self.backbone.parameters():
             param.requires_grad = False
         
-        self.classifier = nn.Linear(in_features=1024, out_features=NUM_CLASSES)
+#         self.classifier = nn.Linear(in_features=1024, out_features=NUM_CLASSES)
         
-        self.accuracy = torchmetrics.Accuracy()
+        self.classifier = nn.Sequential(
+            nn.Linear(2048, 512),
+            nn.Dropout(0.25),
+            nn.GELU(),
+            nn.Linear(512, 256),
+            nn.Dropout(0.25),
+            nn.GELU(),
+            nn.Linear(256, NUM_CLASSES)
+        )
+        
+        self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=NUM_CLASSES, top_k=1)
         
         self.training_loss = []
         self.valid_loss = []
         self.valid_acc = []
 
     def forward(self, x):
-        x = self.backbone(x)
+#         x = self.backbone(x)
+        
+        features = self.backbone.get_intermediate_layers(
+                    x, 1, return_class_token=True
+        )
+        x = create_linear_input(features, use_n_blocks=1, use_avgpool=True)
+        
         return self.classifier(x)
 
     def training_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
         loss = nn.functional.cross_entropy(y_hat, y)
-        self.log('train_loss', loss)
+        self.log('train_loss', loss, sync_dist=True)
         self.training_loss.append(loss)
         return loss
     
@@ -116,7 +132,9 @@ class ImageClassifier(pl.LightningModule):
 #         scheduler = torch.optim.lr_scheduler.OneCycleLR(
 #             optimizer, max_lr=1e-3, total_steps=self.trainer.estimated_stepping_batches
 #         )
-        return {"optimizer": optimizer}
+        
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.7)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler}
 
     
 if __name__ == "__main__":
@@ -128,7 +146,8 @@ if __name__ == "__main__":
     neptune_logger = NeptuneLogger(
         api_key = os.getenv("NEPTUNE_API_TOKEN"),
         project = os.environ.get('NEPTUNE_PROJECT'),
-        tags = ['mlp', 'giacomo']
+        tags = ['mlp', 'giacomo'],
+#         mode="offline"
     )
     
     trainer = pl.Trainer(max_epochs=10, accelerator="gpu", devices=4, log_every_n_steps=10, logger=neptune_logger)
