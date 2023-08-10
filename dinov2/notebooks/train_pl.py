@@ -9,6 +9,10 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import NeptuneLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
 import torchmetrics
+import albumentations as aug
+from albumentations.pytorch.transforms import ToTensorV2
+import cv2
+import numpy as np
 
 import sys
 sys.path.append("/cnvrg/")
@@ -21,44 +25,116 @@ from dinov2.eval.linear import create_linear_input
 # Define constants (adjust these to your dataset)
 IMG_SIZE = 224      # Image size expected by your backbone model
 
+class Tr:
+    def __init__(self, alb_t):
+        self._alb_t = alb_t
+    
+    def __call__(self, item):
+        
+        return self._alb_t(image=np.array(item))['image']
+
+    
+def stratified_sampling(ds, n):
+    
+    # Build lookup table of class -> file
+    idxs = {i: [] for i in range(len(ds.classes))}
+
+    for i, s in enumerate(ds.samples):
+
+        idxs[s[1]].append(i)
+    
+    # Build sample
+    sample = []
+    for c in idxs:
+        sample.extend(np.random.choice(idxs[c], n, replace=False))
+    
+    return np.array(sample)
+
+    
 # 1. Dataset Preparation
 class ImageNetDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, batch_size=512, invert=False):
+    def __init__(self, data_dir, batch_size=512, invert=False, transform_kind='dinov2'):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
-        self.transform = transform = transforms.Compose([
-            transforms.RandomResizedCrop(IMG_SIZE),  # Resize and crop the image to a 224x224 square
-            transforms.RandomHorizontalFlip(),  # Randomly flip the image horizontally
-            transforms.ColorJitter(0.1, 0.1, 0.1, 0.1),
-            transforms.GaussianBlur((5, 5), sigma=(0.1, 0.5)),
-            transforms.ToTensor(),  # Convert the image to a tensor
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])  # Normalize the image with mean and standard deviation
-        ])
         
-        self.val_transform = transform = transforms.Compose([
-            transforms.CenterCrop(IMG_SIZE),  # Resize and crop the image to a 224x224 square
-            transforms.ToTensor(),  # Convert the image to a tensor
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])  # Normalize the image with mean and standard deviation
-        ])
+        if transform_kind == 'dinov2':
+            
+            self.transform = transform = transforms.Compose([
+                transforms.RandomResizedCrop(IMG_SIZE),  # Resize and crop the image to a 224x224 square
+                transforms.RandomHorizontalFlip(),  # Randomly flip the image horizontally
+                transforms.ToTensor(),  # Convert the image to a tensor
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])  # Normalize the image with mean and standard deviation
+            ])
+
+            self.val_transform = transform = transforms.Compose([
+                transforms.CenterCrop(IMG_SIZE),  # Resize and crop the image to a 224x224 square
+                transforms.ToTensor(),  # Convert the image to a tensor
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])  # Normalize the image with mean and standard deviation
+            ])
+        elif transform_kind == 'cape':
         
+            self.val_transform = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(IMG_SIZE),  # Resize and crop the image to a 224x224 square
+                transforms.ToTensor(),  # Convert the image to a tensor
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])  # Normalize the image with mean and standard deviation
+            ])
+            self.transform = Tr(aug.Compose(
+                [
+                    # resize every chip to NxN
+                    aug.Resize(256, 256, interpolation=cv2.INTER_LINEAR),
+                    aug.RandomCrop(IMG_SIZE, IMG_SIZE),
+                    aug.Flip(),
+                    aug.Transpose(),
+                    aug.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4, p=0.5),
+                    aug.OneOf(
+                        [
+                            aug.GaussianBlur(),
+                            aug.MotionBlur(),
+                            aug.Downscale(interpolation=cv2.INTER_NEAREST),
+                            aug.ImageCompression(30, 100),
+                        ],
+                        p=0.25,
+                    ),
+                    aug.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+                    ToTensorV2(),
+                ]
+            ))
+        else:
+            raise ValueError("Transform kind can only be cape or dinov2")
+            
         # whether invert train with val (because we screw up preparing RG dataset)
         self.invert = invert
 
     def setup(self, stage=None):
-        
+
         if self.invert:
             print("SWAPPING train and val")
             self.train_data = ImageFolder(os.path.join(self.data_dir, 'val'), transform=self.transform)
-            self.val_data = ImageFolder(os.path.join(self.data_dir, 'train'), transform=self.transform)
+            self.val_data = ImageFolder(os.path.join(self.data_dir, 'train'), transform=self.val_transform)
         
         else:
             
             self.train_data = ImageFolder(os.path.join(self.data_dir, 'train'), transform=self.transform)
-            self.val_data = ImageFolder(os.path.join(self.data_dir, 'val'), transform=self.transform)
-
+            self.val_data = ImageFolder(os.path.join(self.data_dir, 'val'), transform=self.val_transform)
+    
+    @property
+    def n_classes(self):
+        return len(self.train_data.classes)
+    
     def train_dataloader(self):
-        return DataLoader(self.train_data, batch_size=self.batch_size, shuffle=True, num_workers=12)
+        if args.subset > 0:
+            dataset_subset = torch.utils.data.Subset(
+                self.train_data, 
+                stratified_sampling(self.train_data, args.subset)
+            )
+        else:
+            dataset_subset = self.train_data
+        
+        print(f"Using {len(dataset_subset)} training data points")
+        
+        return DataLoader(dataset_subset, batch_size=self.batch_size, shuffle=True, num_workers=12)
 
     def val_dataloader(self):
         return DataLoader(self.val_data, batch_size=self.batch_size, num_workers=12)
@@ -72,14 +148,14 @@ class ImageClassifier(pl.LightningModule):
         for param in self.backbone.parameters():
             param.requires_grad = False
         
-#         self.classifier = nn.Linear(in_features=1024, out_features=n_classes)
+#         self.classifier = nn.Linear(in_features=2048, out_features=n_classes)
         
         self.classifier = nn.Sequential(
             nn.Linear(2048, 512),
-            nn.Dropout(0.25),
+            nn.Dropout(0.3),
             nn.GELU(),
             nn.Linear(512, 256),
-            nn.Dropout(0.25),
+            nn.Dropout(0.3),
             nn.GELU(),
             nn.Linear(256, n_classes)
         )
@@ -90,7 +166,7 @@ class ImageClassifier(pl.LightningModule):
         self.valid_loss = []
         self.valid_acc = []
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
 #         x = self.backbone(x)
         
         features = self.backbone.get_intermediate_layers(
@@ -165,16 +241,18 @@ if __name__ == "__main__":
         help='Path to the checkpoint for the dinov2 model',
         required=True
     )
+
     parser.add_argument(
-        '--n_classes', 
-        help='Number of classes',
-        required=True,
-        type=int
+        '--subset', 
+        help='How many data points to use. Use 0 to use them all',
+        required=False,
+        type=int,
+        default=0
     )
     
     parser.add_argument('--swap', action='store_true', help="Swap train and val")
     parser.add_argument('--no-swap', dest='swap', action='store_false')
-    parser.set_defaults(swap=True)
+    parser.set_defaults(swap=False)
 
     args = parser.parse_args()
     
@@ -188,7 +266,8 @@ if __name__ == "__main__":
     # 3. Training
     data_dir = args.data
     data_module = ImageNetDataModule(data_dir, batch_size=512, invert=args.swap)
-    classifier_model = ImageClassifier(model, args.n_classes)
+    data_module.setup()
+    classifier_model = ImageClassifier(model, data_module.n_classes)
     
     neptune_logger = NeptuneLogger(
         api_key = os.getenv("NEPTUNE_API_TOKEN"),
@@ -207,4 +286,7 @@ if __name__ == "__main__":
         logger=neptune_logger,
         callbacks=[lr_monitor]
     )
+    
+    neptune_logger.experiment["parameters"] = args
+    
     trainer.fit(classifier_model, datamodule=data_module)
