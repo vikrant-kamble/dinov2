@@ -346,17 +346,19 @@ def custom_weight_loader_l(model, pretrained_weights):
 
             name = f"backbone.blocks.{block}.{n}.{'.'.join(tokens[2:])}"
 
-            if "mlp.fc1" in k:
+            return name
+        
+            # if "mlp.fc1" in k:
 
-                return name.replace("fc1", "w12")
+            #     return name.replace("fc1", "w12")
             
-            elif "mlp.fc2" in k:
+            # elif "mlp.fc2" in k:
 
-                return name.replace("fc2", "w3")
+            #     return name.replace("fc2", "w3")
             
-            else:
+            # else:
 
-                return name
+            #     return name
 
         else:
             
@@ -366,6 +368,10 @@ def custom_weight_loader_l(model, pretrained_weights):
             
     # NOTE: the Dino and the iBot heads will NOT be overwritten
     # so they will stay randomly initialized
+    # Positional embeddings might not be compatible because they depend on the
+    # input resolution
+    if "backbone.pos_embed" in state_dict:
+        state_dict.pop("backbone.pos_embed")
     model.student.load_state_dict(state_dict, strict=False)
 
     # NOTE: the teacher will be updated with the student weights later

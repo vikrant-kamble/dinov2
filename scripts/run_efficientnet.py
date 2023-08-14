@@ -8,7 +8,7 @@ print(os.environ.get('CONDA_PREFIX'))
 
 model_name = "efficientnet-b2"
 add_pooling = False
-checkpoint_path = "/home/ec2-user/cape_weights/multitask/efficientnet-b2.ckpt"
+checkpoint_path = "/home/franziska/PycharmProjects/dinov2/mtmv_last.ckpt"
 container = CapeBackbone(model_name, pretrained=True, in_channels=3)
 model= container.get_features(add_pooling, checkpoint_path)
 model = model.eval()

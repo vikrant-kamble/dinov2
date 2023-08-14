@@ -33,9 +33,11 @@ class _BaseBackbone(ABC):
             backbone = torch.nn.Sequential(backbone, torch.nn.AdaptiveAvgPool2d(1), torch.nn.Flatten(start_dim=1))
         else:
             backbone = torch.nn.Sequential(backbone, torch.nn.Flatten(start_dim=1))
+            backbone = backbone
         # load state dict if provided
         if checkpoint_path:
-            backbone.load_state_dict(self._extract_state_dict(checkpoint_path, self._layer_key_name), strict=False)
+            loading_result = backbone.load_state_dict(self._extract_state_dict(checkpoint_path, self._layer_key_name), strict=False)
+            print(loading_result)
         return backbone
 
     @property

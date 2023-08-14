@@ -10,5 +10,7 @@ nohup watch -n 180 python /home/ec2-user/dinov2/dinov2/run/train/track_run.py --
 
 Eval:
 
-do SLURM_PARITION=t4 python /home/ec2-user/dinov2/dinov2/run/eval/knn.py --config-file ~/lr001/config.yaml --pretrained-weights ~/lr001/eval/${chk}/teacher_checkpoint.pth --output-dir ~/lr001/eval/${chk}/knn_rg --train-dataset Cape:split=TRAIN:root=/home/ec2-user/rg_evaluation_imagenet:extra=/home/ec2-user/rg_evaluation_imagenet --val-dataset Cape:split=VAL:root=/home/ec2-user/rg_evaluation_imagenet:extra=/home/ec2-user/rg_evaluation_imagenet --nodes 2 --ngpus 1; done
+export outdir=swiglufused_finetune_224_short
+for chk in $(ls /home/ec2-user/${outdir}/eval/); do SLURM_PARITION=t4 python /home/ec2-user/dinov2/dinov2/run/eval/knn.py --config-file ~/${outdir}/config.yaml --pretrained-weights ~/${outdir}/eval/${chk}/teacher_checkpoint.pth --output-dir ~/${outdir}/eval/${chk}/knn_rg --train-dataset Cape:split=TRAIN:root=/home/ec2-user/rg_evaluation_imagenet:extra=/home/ec2-user/rg_evaluation_imagenet --val-dataset Cape:split=VAL:root=/home/ec2-user/rg_evaluation_imagenet:extra=/home/ec2-user/rg_evaluation_imagenet --nodes 2 --ngpus 1; done
 
+for chk in $(ls /home/ec2-user/${outdir}/eval/); do SLURM_PARITION=t4 python /home/ec2-user/dinov2/dinov2/run/eval/knn.py --config-file ~/${outdir}/config.yaml --pretrained-weights ~/${outdir}/eval/${chk}/teacher_checkpoint.pth --output-dir ~/${outdir}/eval/${chk}/knn --train-dataset Cape:split=TRAIN:root=/home/ec2-user/rcr_evaluation_imagenet:extra=/home/ec2-user/rcr_evaluation_imagenet --val-dataset Cape:split=VAL:root=/home/ec2-user/rcr_evaluation_imagenet:extra=/home/ec2-user/rcr_evaluation_imagenet --nodes 2 --ngpus 1; done

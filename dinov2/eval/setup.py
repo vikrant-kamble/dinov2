@@ -6,12 +6,12 @@
 
 import argparse
 from typing import Any, List, Optional, Tuple
-
+import sys
 import torch
 import torch.backends.cudnn as cudnn
 
 from dinov2.models import build_model_from_cfg
-from dinov2.utils.config import setup
+from dinov2.utils.config import setup, setup_single_node
 import dinov2.utils.utils as dinov2_utils
 from dinov2.models.cape_backbone import CapeBackbone
 
@@ -68,6 +68,12 @@ def build_model_for_eval(config, pretrained_weights, cuda=True):
         model.cuda()
     return model
 
+def setup_and_build_model_single_node(args) -> Tuple[Any, torch.dtype]:
+    cudnn.benchmark = True
+    config = setup_single_node(args)
+    model = build_model_for_eval(config, args.pretrained_weights)
+    autocast_dtype = get_autocast_dtype(config)
+    return model, autocast_dtype
 
 def setup_and_build_model(args) -> Tuple[Any, torch.dtype]:
     cudnn.benchmark = True
@@ -79,9 +85,18 @@ def setup_and_build_model(args) -> Tuple[Any, torch.dtype]:
 def setup_and_build_efficientnet_model(args) -> Tuple[Any, torch.dtype]:
     cudnn.benchmark = True
     config = setup(args)
-    model_name = "efficientnet-b2"
     add_pooling = True
-    container = CapeBackbone(model_name, pretrained=True, in_channels=3)
+    container = CapeBackbone("efficientnet-b2", pretrained=True, in_channels=3)
+    model = container.get_features(add_pooling, args.pretrained_weights)
+    model = model.eval()
+    model.cuda()
+    return model, torch.half
+
+def setup_and_build_efficientnet_model_b7(args) -> Tuple[Any, torch.dtype]:
+    cudnn.benchmark = True
+    config = setup(args)
+    add_pooling = True
+    container = CapeBackbone("efficientnet-b7", pretrained=True, in_channels=3)
     model = container.get_features(add_pooling, args.pretrained_weights)
     model = model.eval()
     model.cuda()

@@ -60,6 +60,17 @@ def default_setup(args):
     logger.info("git:\n  {}\n".format(utils.get_sha()))
     logger.info("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
 
+def single_node_setup(args):
+
+
+    global logger
+    setup_logging(output=args.output_dir, level=logging.INFO)
+    logger = logging.getLogger("dinov2")
+
+
+    logger.info("git:\n  {}\n".format(utils.get_sha()))
+    logger.info("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
+
 
 def setup(args):
     """
@@ -67,7 +78,18 @@ def setup(args):
     """
     cfg = get_cfg_from_args(args)
     os.makedirs(args.output_dir, exist_ok=True)
-    #default_setup(args)
+    default_setup(args)
+    apply_scaling_rules_to_cfg(cfg)
+    write_config(cfg, args.output_dir)
+    return cfg
+
+def setup_single_node(args):
+    """
+    Create configs and perform basic setups.
+    """
+    cfg = get_cfg_from_args(args)
+    os.makedirs(args.output_dir, exist_ok=True)
+    single_node_setup(args)
     apply_scaling_rules_to_cfg(cfg)
     write_config(cfg, args.output_dir)
     return cfg

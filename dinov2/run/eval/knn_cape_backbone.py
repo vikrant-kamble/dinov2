@@ -8,7 +8,7 @@ import logging
 import os
 import sys
 
-from dinov2.eval.knn import get_args_parser as get_knn_args_parser
+from dinov2.eval.knn_cape_backbone import get_args_parser as get_knn_args_parser
 from dinov2.logging import setup_logging
 from dinov2.run.submit import get_args_parser, submit_jobs
 
