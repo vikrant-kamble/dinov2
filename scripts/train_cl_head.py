@@ -7,7 +7,7 @@ from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import NeptuneLogger
-from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 import torchmetrics
 import albumentations as aug
 from albumentations.pytorch.transforms import ToTensorV2
@@ -224,6 +224,7 @@ class ImageClassifier(pl.LightningModule):
 if __name__ == "__main__":
     
     import argparse
+    pl.utilities.seed.seed_everything(seed=0, workers=True)
 
     parser = argparse.ArgumentParser(description='Run Pythorch Lightning training')
     parser.add_argument(
@@ -239,6 +240,12 @@ if __name__ == "__main__":
     parser.add_argument(
         '--checkpoint', 
         help='Path to the checkpoint for the dinov2 model',
+        required=True
+    )
+
+    parser.add_argument(
+        '--outpath',
+        help='Path to the output directory',
         required=True
     )
 
@@ -275,6 +282,14 @@ if __name__ == "__main__":
         tags = ['mlp', 'franziska'],
         log_model_checkpoints=False  # otherwise Neptune saves _every_ checkpoint for a total of 100 Gb
     )
+
+    checkpoint_callback = ModelCheckpoint(
+        save_top_k=2,
+        monitor="epoch",
+        mode="max",
+        dirpath=args.outpath,
+        filename="dinohead-{epoch:02d}-{global_step}",
+    )
     
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
     
@@ -284,7 +299,7 @@ if __name__ == "__main__":
         devices=1, 
         log_every_n_steps=10, 
         logger=neptune_logger,
-        callbacks=[lr_monitor]
+        callbacks=[lr_monitor, checkpoint_callback]
     )
     
     neptune_logger.experiment["parameters"] = args
