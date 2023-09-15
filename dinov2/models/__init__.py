@@ -13,7 +13,7 @@ logger = logging.getLogger("dinov2")
 
 
 def build_model(args, only_teacher=False, img_size=224):
-    args.arch = args.arch.removesuffix("_memeff")
+    #args.arch = args.arch.removesuffix("_memeff")
     if "vit" in args.arch:
         vit_kwargs = dict(
             img_size=img_size,
