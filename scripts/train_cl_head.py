@@ -34,29 +34,38 @@ class Tr:
         return self._alb_t(image=np.array(item))['image']
 
     
-def stratified_sampling(ds, n):
-    
-    # Build lookup table of class -> file
-    idxs = {i: [] for i in range(len(ds.classes))}
+def stratified_sampling(samples, n, classes, val_fraction):
+    # n is the total number of samples we want in the end, with a val fraction of val_fraction
 
-    for i, s in enumerate(ds.samples):
+    # Build lookup table of class -> file
+    idxs = {i: [] for i in range(len(classes))}
+
+    for i, s in enumerate(samples):
 
         idxs[s[1]].append(i)
     
     # Build sample
-    sample = []
+    sample_train = []
+    sample_val = []
+    n_train = int((n * (1 - val_fraction))/len(classes))
+    n_val = int((n * val_fraction)/len(classes))
     for c in idxs:
-        sample.extend(np.random.choice(idxs[c], n, replace=False))
+        chosen_for_train = np.random.choice(idxs[c], n_train, replace=False)
+        not_chosen_for_train = [i for i in idxs[c] if i not in chosen_for_train]
+        chosen_for_val = np.random.choice(not_chosen_for_train, n_val, replace=False)
+        sample_train.extend(chosen_for_train)
+        sample_val.extend(chosen_for_val)
     
-    return np.array(sample)
+    return np.array(sample_train), np.array(sample_val)
 
     
 # 1. Dataset Preparation
 class ImageNetDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, batch_size=512, invert=False, transform_kind='dinov2'):
+    def __init__(self, data_dir, batch_size=512, transform_kind='dinov2', val_fraction=0.2):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
+        self.val_fraction = val_fraction
         
         if transform_kind == 'dinov2':
             
@@ -105,39 +114,42 @@ class ImageNetDataModule(pl.LightningDataModule):
             raise ValueError("Transform kind can only be cape or dinov2")
             
         # whether invert train with val (because we screw up preparing RG dataset)
-        self.invert = invert
 
     def setup(self, stage=None):
 
-        if self.invert:
-            print("SWAPPING train and val")
-            self.train_data = ImageFolder(os.path.join(self.data_dir, 'val'), transform=self.transform)
-            self.val_data = ImageFolder(os.path.join(self.data_dir, 'train'), transform=self.val_transform)
-        
-        else:
-            
-            self.train_data = ImageFolder(os.path.join(self.data_dir, 'train'), transform=self.transform)
-            self.val_data = ImageFolder(os.path.join(self.data_dir, 'val'), transform=self.val_transform)
+        self.train_val_data = ImageFolder(os.path.join(self.data_dir, 'train'), transform=self.transform)
+        # take subset of training data in case we want to train/val on less data
+        total_samples_num = len(self.train_val_data.samples)
+        if args.subset > 0:
+            total_samples_num = args.subset
+        subset_train, subset_val = stratified_sampling(self.train_val_data.samples, total_samples_num, self.train_val_data.classes, args.valfraction)
+        dataset_train = torch.utils.data.Subset(
+            self.train_val_data,
+            subset_train
+        )
+        dataset_val = torch.utils.data.Subset(
+            self.train_val_data,
+            subset_val
+        )
+
+        self.train_data = dataset_train
+        self.val_data = dataset_val
+        self.test_data = ImageFolder(os.path.join(self.data_dir, 'val'), transform=self.val_transform)
     
     @property
     def n_classes(self):
-        return len(self.train_data.classes)
+        return len(self.train_val_data.classes)
     
     def train_dataloader(self):
-        if args.subset > 0:
-            dataset_subset = torch.utils.data.Subset(
-                self.train_data, 
-                stratified_sampling(self.train_data, args.subset)
-            )
-        else:
-            dataset_subset = self.train_data
-        
-        print(f"Using {len(dataset_subset)} training data points")
-        
-        return DataLoader(dataset_subset, batch_size=self.batch_size, shuffle=True, num_workers=8)
+        print(f"Using {len(self.train_data)} training data points")
+        return DataLoader(self.train_data, batch_size=self.batch_size, shuffle=True, num_workers=8)
 
     def val_dataloader(self):
+        print(f"Using {len(self.val_data)} validation data points")
         return DataLoader(self.val_data, batch_size=self.batch_size, num_workers=8)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_data, batch_size=self.batch_size, num_workers=8)
 
 # 2. Model Definition
 class ImageClassifier(pl.LightningModule):
@@ -193,6 +205,24 @@ class ImageClassifier(pl.LightningModule):
         self.valid_acc.append(acc)
         
         return {'loss': loss, 'acc': acc}
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        return self(batch)
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        loss = nn.functional.cross_entropy(y_hat, y)
+
+        # log 6 example images
+        #sample_imgs = x[:6]
+        #grid = torchvision.utils.make_grid(sample_imgs)
+        #self.logger.experiment.add_image('example_images', grid, 0)
+
+        # calculate acc
+        test_acc = self.accuracy(y_hat.softmax(dim=-1), y)
+
+        # log the outputs!
+        self.log_dict({'test_loss': loss, 'test_acc': test_acc})
     
     def on_validation_epoch_end(self):
         avg_loss_val = torch.stack(self.valid_loss).mean()
@@ -256,9 +286,15 @@ if __name__ == "__main__":
         type=int,
         default=0
     )
+
+    parser.add_argument(
+        '--valfraction',
+        help='What fraction of the training data to use for validation',
+        required=False,
+        type=float,
+        default=0.2
+    )
     
-    parser.add_argument('--swap', action='store_true', help="Swap train and val")
-    parser.add_argument('--no-swap', dest='swap', action='store_false')
     parser.set_defaults(swap=False)
 
     args = parser.parse_args()
@@ -272,7 +308,7 @@ if __name__ == "__main__":
     
     # 3. Training
     data_dir = args.data
-    data_module = ImageNetDataModule(data_dir, batch_size=1024, invert=args.swap)
+    data_module = ImageNetDataModule(data_dir, batch_size=1024, transform_kind='dinov2', val_fraction=args.valfraction)
     data_module.setup()
     classifier_model = ImageClassifier(model, data_module.n_classes)
     
@@ -294,7 +330,7 @@ if __name__ == "__main__":
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
     
     trainer = pl.Trainer(
-        max_epochs=100, 
+        max_epochs=10,
         accelerator="gpu", 
         devices=1, 
         log_every_n_steps=10, 
@@ -305,3 +341,5 @@ if __name__ == "__main__":
     neptune_logger.experiment["parameters"] = args
     
     trainer.fit(classifier_model, datamodule=data_module)
+    classifier_model.eval()
+    trainer.test(classifier_model, dataloaders=data_module.test_dataloader())
