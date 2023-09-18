@@ -247,8 +247,9 @@ class ImageClassifier(pl.LightningModule):
 #             optimizer, max_lr=1e-3, total_steps=self.trainer.estimated_stepping_batches
 #         )
         
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.98)
-        return {"optimizer": optimizer, "lr_scheduler": scheduler}
+        #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.98)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=4, factor=0.5, verbose=True, min_lr=1e-6, threshold=0.01, threshold_mode='abs')
+        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "val_loss"}
 
 
 if __name__ == "__main__":
@@ -316,8 +317,18 @@ if __name__ == "__main__":
         api_key ="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIwODViNzIxOC1jMjUyLTRhMGMtOWYwNi1kYjgxMGFkM2FhMjAifQ==",
         project = "cape/dinov2",
         tags = ['mlp', 'franziska'],
+        description=os.getenv('CNVRG_JOB_URL'),
         log_model_checkpoints=False  # otherwise Neptune saves _every_ checkpoint for a total of 100 Gb
     )
+    # record the additional metadata
+    neptune_logger.experiment['CNVRG_JOB_NAME'] = os.getenv('CNVRG_JOB_NAME', 'local')
+    neptune_logger.experiment['CNVRG_JOB_URL'] = os.getenv('CNVRG_JOB_URL', 'local')
+    # in order to continue writing into this neptune run,
+    # we need to set the run_id to the one from the environment
+    run_id = neptune_logger.experiment['sys/id'].fetch()
+    # for non-master GPUs run_id will be None
+    if run_id:
+        os.environ["NEPTUNE_RUN_ID"] = run_id
 
     checkpoint_callback = ModelCheckpoint(
         save_top_k=2,
@@ -330,7 +341,7 @@ if __name__ == "__main__":
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
     
     trainer = pl.Trainer(
-        max_epochs=10,
+        max_epochs=100,
         accelerator="gpu", 
         devices=1, 
         log_every_n_steps=10, 
