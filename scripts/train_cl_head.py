@@ -47,21 +47,22 @@ def stratified_sampling(samples, n, classes, val_fraction):
     # Build sample
     sample_train = []
     sample_val = []
+
     n_train = math.floor((n * (1 - val_fraction))/len(classes))
     n_val = math.floor((n * val_fraction)/len(classes))
     not_chosen_at_all = []
     for c in idxs:
-        chosen_for_train = np.random.choice(idxs[c], max(n_train, len(idxs[c])), replace=False)
+        chosen_for_train = np.random.choice(idxs[c], min(n_train, len(idxs[c])), replace=False)
         not_chosen_for_train = [i for i in idxs[c] if i not in chosen_for_train]
-        chosen_for_val = np.random.choice(not_chosen_for_train, max(n_val, len(not_chosen_for_train)), replace=False)
+        chosen_for_val = np.random.choice(not_chosen_for_train, min(n_val, len(not_chosen_for_train)), replace=False)
         sample_train.extend(chosen_for_train)
         sample_val.extend(chosen_for_val)
         not_chosen_at_all.extend([i for i in idxs[c] if i not in chosen_for_train and i not in chosen_for_val])
     # add the rest of the samples to the train set
-    extension_for_train = np.random.choice(not_chosen_at_all, n_train - len(sample_train), replace=False)
+    extension_for_train = np.random.choice(not_chosen_at_all, math.floor(n * (1 - val_fraction)) - len(sample_train), replace=False)
     sample_train.extend(extension_for_train)
     not_chosen_for_train_extension = [i for i in not_chosen_at_all if i not in extension_for_train]
-    sample_val.extend(np.random.choice(not_chosen_for_train_extension, n_val - len(sample_val), replace=False))
+    sample_val.extend(np.random.choice(not_chosen_for_train_extension, math.floor(n * val_fraction) - len(sample_val), replace=False))
     
     return np.array(sample_train), np.array(sample_val)
 
