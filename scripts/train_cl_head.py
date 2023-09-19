@@ -321,7 +321,9 @@ if __name__ == "__main__":
 
     pretrained_weights = args.checkpoint
     model = build_model_for_eval(cfg, pretrained_weights, cuda=False)
-
+    # add output directory if it doesn't exist
+    if not os.path.exists(args.outpath):
+        os.makedirs(args.outpath)
     
     # 3. Training
     data_dir = args.data
