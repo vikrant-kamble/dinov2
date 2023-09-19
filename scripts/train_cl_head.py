@@ -13,7 +13,7 @@ import albumentations as aug
 from albumentations.pytorch.transforms import ToTensorV2
 import cv2
 import numpy as np
-
+import math
 import sys
 sys.path.append("/cnvrg/")
 
@@ -47,14 +47,21 @@ def stratified_sampling(samples, n, classes, val_fraction):
     # Build sample
     sample_train = []
     sample_val = []
-    n_train = int((n * (1 - val_fraction))/len(classes))
-    n_val = int((n * val_fraction)/len(classes))
+    n_train = math.floor((n * (1 - val_fraction))/len(classes))
+    n_val = math.floor((n * val_fraction)/len(classes))
+    not_chosen_at_all = []
     for c in idxs:
-        chosen_for_train = np.random.choice(idxs[c], n_train, replace=False)
+        chosen_for_train = np.random.choice(idxs[c], max(n_train, len(idxs[c])), replace=False)
         not_chosen_for_train = [i for i in idxs[c] if i not in chosen_for_train]
-        chosen_for_val = np.random.choice(not_chosen_for_train, n_val, replace=False)
+        chosen_for_val = np.random.choice(not_chosen_for_train, max(n_val, len(not_chosen_for_train)), replace=False)
         sample_train.extend(chosen_for_train)
         sample_val.extend(chosen_for_val)
+        not_chosen_at_all.extend([i for i in idxs[c] if i not in chosen_for_train and i not in chosen_for_val])
+    # add the rest of the samples to the train set
+    extension_for_train = np.random.choice(not_chosen_at_all, n_train - len(sample_train), replace=False)
+    sample_train.extend(extension_for_train)
+    not_chosen_for_train_extension = [i for i in not_chosen_at_all if i not in extension_for_train]
+    sample_val.extend(np.random.choice(not_chosen_for_train_extension, n_val - len(sample_val), replace=False))
     
     return np.array(sample_train), np.array(sample_val)
 
@@ -123,6 +130,11 @@ class ImageNetDataModule(pl.LightningDataModule):
         if args.subset > 0:
             total_samples_num = args.subset
         subset_train, subset_val = stratified_sampling(self.train_val_data.samples, total_samples_num, self.train_val_data.classes, args.valfraction)
+        np.save(args.outpath+"/subset_val_indices.npy", subset_val)
+        np.save(args.outpath + "/subset_train_indices.npy", subset_train)
+        np.save(args.outpath + "/all_samples.npy", self.train_val_data.samples)
+
+
         dataset_train = torch.utils.data.Subset(
             self.train_val_data,
             subset_train
