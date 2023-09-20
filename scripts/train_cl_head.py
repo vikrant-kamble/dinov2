@@ -348,13 +348,19 @@ if __name__ == "__main__":
     if run_id:
         os.environ["NEPTUNE_RUN_ID"] = run_id
 
-    checkpoint_callback = ModelCheckpoint(
+    checkpoint_callback_regular = ModelCheckpoint(
         save_top_k=2,
         monitor="epoch",
         mode="max",
         dirpath=args.outpath,
         filename="dinohead-{epoch:02d}-{global_step}",
     )
+
+    checkpoint_callback_best = ModelCheckpoint(
+        monitor = 'val_loss',
+        save_top_k=3,
+        dirpath = args.outpath,
+        filename = 'dinohead-{epoch:02d}-{val_loss:.2f}')
     
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
     
@@ -364,7 +370,8 @@ if __name__ == "__main__":
         devices=1, 
         log_every_n_steps=10, 
         logger=neptune_logger,
-        callbacks=[lr_monitor, checkpoint_callback]
+        monitor="val_loss",
+        callbacks=[lr_monitor, checkpoint_callback_regular, checkpoint_callback_best]
     )
     
     neptune_logger.experiment["parameters"] = args
