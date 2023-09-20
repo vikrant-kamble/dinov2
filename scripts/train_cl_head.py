@@ -260,11 +260,11 @@ class ImageClassifier(pl.LightningModule):
 #             optimizer, max_lr=1e-3, total_steps=self.trainer.estimated_stepping_batches
 #         )
         
-        #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.98)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.98)
+        """scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
                                                                factor=0.5, patience=10, threshold=0.0001,
                                                                threshold_mode='rel',
-                                                               verbose=True, min_lr=1e-6)
+                                                               verbose=True, min_lr=1e-6)"""
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "val_loss"}
 
 
