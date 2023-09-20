@@ -22,7 +22,7 @@ from dinov2.utils.config import setup
 from dinov2.utils.utils import CosineScheduler
 
 from dinov2.train.ssl_meta_arch import SSLMetaArch
-
+import omegaconf
 
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
 logger = logging.getLogger("dinov2")
@@ -55,6 +55,8 @@ For python-based LazyConfig, use "path.key=value".
         type=str,
         help="Output directory to save logs and checkpoints",
     )
+    
+    parser.add_argument("--local-rank", default=0, type=int, help="Variable for distributed computing.") 
 
     return parser
 
@@ -386,7 +388,7 @@ def main(args):
 
     try:
         _ = cfg.train.pretrained_weights
-    except KeyError:
+    except omegaconf.errors.ConfigAttributeError:
         model = SSLMetaArch(cfg).to(torch.device("cuda"))
     else:
         if cfg.student.arch == "vit_large":
