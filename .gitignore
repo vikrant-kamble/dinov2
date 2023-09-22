@@ -11,3 +11,6 @@ dist/
 *.swp
 
 .vscode/
+**/wandb
+scale-mae/mae/data
+scale-mae/mae/output_dir
