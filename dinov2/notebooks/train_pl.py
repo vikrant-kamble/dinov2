@@ -1,5 +1,5 @@
 import os
-os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
+# os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 import torch
 from torch import nn
 from torchvision import transforms
@@ -13,6 +13,9 @@ import albumentations as aug
 from albumentations.pytorch.transforms import ToTensorV2
 import cv2
 import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import pandas as pd
 
 import sys
 sys.path.append("/cnvrg/")
@@ -53,7 +56,7 @@ def stratified_sampling(ds, n):
     
 # 1. Dataset Preparation
 class ImageNetDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, batch_size=512, invert=False, transform_kind='dinov2'):
+    def __init__(self, data_dir, batch_size, invert=False, transform_kind='dinov2'):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
@@ -141,31 +144,36 @@ class ImageNetDataModule(pl.LightningDataModule):
 
 # 2. Model Definition
 class ImageClassifier(pl.LightningModule):
-    def __init__(self, backbone_model, n_classes):
+    def __init__(self, backbone_model, n_classes, labels=None):
         super().__init__()
         self.backbone = backbone_model
         self.backbone.eval()  # Freeze the backbone model
         for param in self.backbone.parameters():
             param.requires_grad = False
         
-#         self.classifier = nn.Linear(in_features=2048, out_features=n_classes)
+        self.classifier = nn.Linear(in_features=2048, out_features=n_classes)
         
-        self.classifier = nn.Sequential(
-            nn.Linear(2048, 512),
-            nn.Dropout(0.3),
-            nn.GELU(),
-            nn.Linear(512, 256),
-            nn.Dropout(0.3),
-            nn.GELU(),
-            nn.Linear(256, n_classes)
-        )
+#         self.classifier = nn.Sequential(
+#             nn.Linear(2048, 512),
+#             nn.Dropout(0.5),
+#             nn.GELU(),
+#             nn.Linear(512, 256),
+#             nn.Dropout(0.5),
+#             nn.GELU(),
+#             nn.Linear(256, n_classes)
+#         )
         
         self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=n_classes, top_k=1)
         
         self.training_loss = []
         self.valid_loss = []
         self.valid_acc = []
-
+        self.validation_step_y_hats = []
+        self.validation_step_ys = []
+        
+        self.n_classes = n_classes
+        self.labels = labels
+        
     def forward(self, x, **kwargs):
 #         x = self.backbone(x)
         
@@ -192,6 +200,9 @@ class ImageClassifier(pl.LightningModule):
         self.valid_loss.append(loss)
         self.valid_acc.append(acc)
         
+        self.validation_step_y_hats.append(y_hat)
+        self.validation_step_ys.append(y)
+        
         return {'loss': loss, 'acc': acc}
     
     def on_validation_epoch_end(self):
@@ -206,9 +217,24 @@ class ImageClassifier(pl.LightningModule):
             avg_loss_train = torch.stack(self.training_loss).mean()
             self.log('train_loss', avg_loss_train, prog_bar=True, sync_dist=True)
         
+        confusion_matrix = torchmetrics.ConfusionMatrix(task = 'multiclass', num_classes=self.n_classes).cuda()
+        y_hat = torch.cat(self.validation_step_y_hats)
+        y = torch.cat(self.validation_step_ys)
+        confusion_matrix(y_hat, y.int())
+
+        confusion_matrix_computed = confusion_matrix.compute().detach().cpu().numpy().astype(int)
+
+        df_cm = pd.DataFrame(confusion_matrix_computed, index=self.labels, columns=self.labels)
+        plt.figure(figsize = (10,7))
+        fig_ = sns.heatmap(df_cm, annot=True, cmap='Spectral').get_figure()
+        plt.close(fig_)
+        self.loggers[0].experiment["confusion_matrix"].append(fig_)
+        
         self.training_loss.clear()
         self.valid_loss.clear()
         self.valid_acc.clear()
+        self.validation_step_y_hats.clear()
+        self.validation_step_ys.clear()
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.classifier.parameters(), lr=0.001)
@@ -241,7 +267,8 @@ if __name__ == "__main__":
         help='Path to the checkpoint for the dinov2 model',
         required=True
     )
-
+    parser.add_argument('--batch_size', default=512, type=int, required=False)
+    
     parser.add_argument(
         '--subset', 
         help='How many data points to use. Use 0 to use them all',
@@ -265,9 +292,10 @@ if __name__ == "__main__":
     
     # 3. Training
     data_dir = args.data
-    data_module = ImageNetDataModule(data_dir, batch_size=512, invert=args.swap)
+    data_module = ImageNetDataModule(data_dir, batch_size=args.batch_size, invert=args.swap)
     data_module.setup()
-    classifier_model = ImageClassifier(model, data_module.n_classes)
+        
+    classifier_model = ImageClassifier(model, data_module.n_classes, data_module.train_data.classes)
     
     neptune_logger = NeptuneLogger(
         api_key = os.getenv("NEPTUNE_API_TOKEN"),

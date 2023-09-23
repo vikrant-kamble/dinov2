@@ -120,7 +120,7 @@ def extract_features_with_dataloader(model, data_loader, sample_count, gather_on
         labels_rank = labels_rank.cuda(non_blocking=True)
         index = index.cuda(non_blocking=True)
         features_rank = model(samples).float()
-        logger.info(f"features_rank size: {features_rank.size()}")
+        #logger.info(f"features_rank size: {features_rank.size()}")
 
         # init storage feature matrix
         if features is None:
@@ -134,8 +134,8 @@ def extract_features_with_dataloader(model, data_loader, sample_count, gather_on
         index_all = all_gather_and_flatten(index).to(gather_device)
         features_all_ranks = all_gather_and_flatten(features_rank).to(gather_device)
         labels_all_ranks = all_gather_and_flatten(labels_rank).to(gather_device)
-        logger.info(f"features_all_ranks size: {features_all_ranks.size()}")
-        logger.info(f"index_all size: {index_all.size()}")
+        #logger.info(f"features_all_ranks size: {features_all_ranks.size()}")
+        #logger.info(f"index_all size: {index_all.size()}")
 
 
         # update storage feature matrix
