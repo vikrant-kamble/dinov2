@@ -297,7 +297,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        '--subset', 
+        '--subset',
         help='How many data points to use. Use 0 to use them all',
         required=False,
         type=int,
@@ -311,12 +311,20 @@ if __name__ == "__main__":
         type=float,
         default=0.2
     )
+
+    parser.add_argument(
+        '--classifiercheckpoint',
+        help='Path to the checkpoint for the classifier model',
+        required=True
+    )
+
     
     parser.set_defaults(swap=False)
 
     args = parser.parse_args()
     
     default_cfg = OmegaConf.create(dinov2_default_config)
+
     cfg = OmegaConf.load(args.config)
     cfg = OmegaConf.merge(default_cfg, cfg)
 
@@ -349,33 +357,20 @@ if __name__ == "__main__":
     if run_id:
         os.environ["NEPTUNE_RUN_ID"] = run_id
 
-    """checkpoint_callback_regular = ModelCheckpoint(
-        save_top_k=2,
-        monitor="epoch",
-        mode="max",
-        dirpath=args.outpath,
-        filename="dinohead-{epoch:02d}-{global_step}",
-    )"""
 
-    checkpoint_callback_best = ModelCheckpoint(
-        monitor = 'val_loss',
-        save_top_k=3,
-        dirpath = args.outpath,
-        filename = 'dinohead-{epoch:02d}-{val_loss:.2f}')
-    
-    lr_monitor = LearningRateMonitor(logging_interval='epoch')
-    
     trainer = pl.Trainer(
         max_epochs=100,
         accelerator="gpu", 
         devices=1, 
         log_every_n_steps=10, 
         logger=neptune_logger,
-        callbacks=[lr_monitor, checkpoint_callback_best]
     )
     
     neptune_logger.experiment["parameters"] = args
-    
-    trainer.fit(classifier_model, datamodule=data_module)
+
+    checkpoint = torch.load(args.classifiercheckpoint)
+    classifier_model.load_state_dict(checkpoint['state_dict'])
     classifier_model.eval()
+
     trainer.test(classifier_model, dataloaders=data_module.test_dataloader())
+

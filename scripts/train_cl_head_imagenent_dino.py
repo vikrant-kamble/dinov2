@@ -176,7 +176,7 @@ class ImageClassifier(pl.LightningModule):
 #         self.classifier = nn.Linear(in_features=2048, out_features=n_classes)
         
         self.classifier = nn.Sequential(
-            nn.Linear(2048, 512),
+            nn.Linear(3072, 512),
             nn.Dropout(0.3),
             nn.GELU(),
             nn.Linear(512, 256),
@@ -328,7 +328,7 @@ if __name__ == "__main__":
     
     # 3. Training
     data_dir = args.data
-    data_module = ImageNetDataModule(data_dir, batch_size=1024, transform_kind='dinov2', val_fraction=args.valfraction)
+    data_module = ImageNetDataModule(data_dir, batch_size=256, transform_kind='dinov2', val_fraction=args.valfraction)
     data_module.setup()
     classifier_model = ImageClassifier(model, data_module.n_classes)
     
