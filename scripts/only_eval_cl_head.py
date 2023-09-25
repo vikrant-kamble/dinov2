@@ -185,7 +185,7 @@ class ImageClassifier(pl.LightningModule):
             nn.Linear(256, n_classes)
         )
         
-        self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=n_classes, top_k=1)
+        self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=n_classes, top_k=1, average="micro")
         
         self.training_loss = []
         self.valid_loss = []
@@ -372,5 +372,6 @@ if __name__ == "__main__":
     classifier_model.load_state_dict(checkpoint['state_dict'])
     classifier_model.eval()
 
-    trainer.test(classifier_model, dataloaders=data_module.test_dataloader())
+    results = trainer.test(classifier_model, dataloaders=data_module.test_dataloader())
+    print(results)
 
