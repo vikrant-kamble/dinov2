@@ -311,6 +311,14 @@ if __name__ == "__main__":
         type=float,
         default=0.2
     )
+
+    parser.add_argument(
+        '--batchsize',
+        help='Batch size for model training',
+        required=False,
+        type=int,
+        default=1024
+    )
     
     parser.set_defaults(swap=False)
 
@@ -328,7 +336,7 @@ if __name__ == "__main__":
     
     # 3. Training
     data_dir = args.data
-    data_module = ImageNetDataModule(data_dir, batch_size=1024, transform_kind='dinov2', val_fraction=args.valfraction)
+    data_module = ImageNetDataModule(data_dir, batch_size=args.batchsize, transform_kind='dinov2', val_fraction=args.valfraction)
     data_module.setup()
     classifier_model = ImageClassifier(model, data_module.n_classes)
     
