@@ -366,7 +366,7 @@ if __name__ == "__main__":
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
     
     trainer = pl.Trainer(
-        max_epochs=100,
+        max_epochs=30,
         accelerator="gpu", 
         devices=1, 
         log_every_n_steps=10, 
