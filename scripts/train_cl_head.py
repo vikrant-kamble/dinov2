@@ -166,10 +166,11 @@ class ImageNetDataModule(pl.LightningDataModule):
 
 # 2. Model Definition
 class ImageClassifier(pl.LightningModule):
-    def __init__(self, backbone_model, n_classes, weight_decay):
+    def __init__(self, backbone_model, n_classes, weight_decay, dropout):
         super().__init__()
         self.backbone = backbone_model
         self.weight_decay = weight_decay
+        self.dropout = dropout
         self.backbone.eval()  # Freeze the backbone model
         for param in self.backbone.parameters():
             param.requires_grad = False
@@ -178,10 +179,10 @@ class ImageClassifier(pl.LightningModule):
         
         self.classifier = nn.Sequential(
             nn.Linear(2048, 512),
-            nn.Dropout(0.3),
+            nn.Dropout(self.dropout),
             nn.GELU(),
             nn.Linear(512, 256),
-            nn.Dropout(0.3),
+            nn.Dropout(self.dropout),
             nn.GELU(),
             nn.Linear(256, n_classes)
         )
@@ -328,6 +329,14 @@ if __name__ == "__main__":
         type=float,
         default=0.05
     )
+
+    parser.add_argument(
+        '--dropout',
+        help='Dropout for classifier model training',
+        required=True,
+        type=float,
+        default=0.3
+    )
     
     parser.set_defaults(swap=False)
 
@@ -347,7 +356,7 @@ if __name__ == "__main__":
     data_dir = args.data
     data_module = ImageNetDataModule(data_dir, batch_size=args.batchsize, transform_kind='dinov2', val_fraction=args.valfraction)
     data_module.setup()
-    classifier_model = ImageClassifier(model, data_module.n_classes, args.weightdecay)
+    classifier_model = ImageClassifier(model, data_module.n_classes, args.weightdecay, args.dropout)
     
     neptune_logger = NeptuneLogger(
         api_key ="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIwODViNzIxOC1jMjUyLTRhMGMtOWYwNi1kYjgxMGFkM2FhMjAifQ==",
