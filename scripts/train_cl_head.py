@@ -325,9 +325,9 @@ if __name__ == "__main__":
     parser.add_argument(
         '--weightdecay',
         help='Weight decay for model training',
-        required=True,
+        required=False,
         type=float,
-        default=0.05
+        default=0
     )
 
     parser.add_argument(
