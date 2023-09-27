@@ -166,9 +166,10 @@ class ImageNetDataModule(pl.LightningDataModule):
 
 # 2. Model Definition
 class ImageClassifier(pl.LightningModule):
-    def __init__(self, backbone_model, n_classes):
+    def __init__(self, backbone_model, n_classes, weight_decay):
         super().__init__()
         self.backbone = backbone_model
+        self.weight_decay = weight_decay
         self.backbone.eval()  # Freeze the backbone model
         for param in self.backbone.parameters():
             param.requires_grad = False
@@ -254,7 +255,7 @@ class ImageClassifier(pl.LightningModule):
         self.valid_acc.clear()
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.classifier.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(self.classifier.parameters(), lr=0.001, weight_decay=self.weight_decay)
         
 #         scheduler = torch.optim.lr_scheduler.OneCycleLR(
 #             optimizer, max_lr=1e-3, total_steps=self.trainer.estimated_stepping_batches
@@ -319,6 +320,14 @@ if __name__ == "__main__":
         type=int,
         default=1024
     )
+
+    parser.add_argument(
+        '--weightdecay',
+        help='Weight decay for model training',
+        required=True,
+        type=float,
+        default=0.05
+    )
     
     parser.set_defaults(swap=False)
 
@@ -338,7 +347,7 @@ if __name__ == "__main__":
     data_dir = args.data
     data_module = ImageNetDataModule(data_dir, batch_size=args.batchsize, transform_kind='dinov2', val_fraction=args.valfraction)
     data_module.setup()
-    classifier_model = ImageClassifier(model, data_module.n_classes)
+    classifier_model = ImageClassifier(model, data_module.n_classes, args.weightdecay)
     
     neptune_logger = NeptuneLogger(
         api_key ="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIwODViNzIxOC1jMjUyLTRhMGMtOWYwNi1kYjgxMGFkM2FhMjAifQ==",
@@ -374,7 +383,7 @@ if __name__ == "__main__":
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
     
     trainer = pl.Trainer(
-        max_epochs=30,
+        max_epochs=80,
         accelerator="gpu", 
         devices=1, 
         log_every_n_steps=10, 
