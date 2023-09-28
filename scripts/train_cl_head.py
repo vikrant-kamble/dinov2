@@ -333,9 +333,17 @@ if __name__ == "__main__":
     parser.add_argument(
         '--dropout',
         help='Dropout for classifier model training',
-        required=True,
+        required=False,
         type=float,
         default=0.3
+    )
+
+    parser.add_argument(
+        '--epochs',
+        help='Number of epochs for classifier model training',
+        required=False,
+        type=int,
+        default=10
     )
     
     parser.set_defaults(swap=False)
@@ -392,7 +400,7 @@ if __name__ == "__main__":
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
     
     trainer = pl.Trainer(
-        max_epochs=80,
+        max_epochs=args.epochs,
         accelerator="gpu", 
         devices=1, 
         log_every_n_steps=10, 
