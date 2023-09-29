@@ -13,9 +13,9 @@ import os
 import sys
 
 try:
-    dataset = sys.argv[1]
+    dataset_name = sys.argv[1]
 except IndexError:
-    dataset = 'rcr_2M_chips'
+    dataset_name = 'rcr_2M_chips'
 
 try:
     destination = sys.argv[2]
@@ -32,7 +32,11 @@ gs = GCSStorage(
 ds = DataStore(name="dinov2", storage=gs)
 
 
-dataset = ds['rcr_2M_chips']
+# dataset = ds[dataset_name]
 
 
-dataset.clone(destination)
+# dataset.clone(destination)
+
+exp = ds['experiments/scale_mae']
+e = exp.get("laced-universe-9")
+e.clone("/data/laced-universe-9")
