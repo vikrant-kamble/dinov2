@@ -10,8 +10,18 @@ from data_store.data_containers import Experiments, Dataset
 from data_store.storage import GCSStorage
 import glob
 import os
+import sys
 
+try:
+    dataset = sys.argv[1]
+except IndexError:
+    dataset = 'rcr_2M_chips'
 
+try:
+    destination = sys.argv[2]
+except IndexError:
+    
+    destination = '/data/chips'
 # %%
 
 
@@ -25,4 +35,4 @@ ds = DataStore(name="dinov2", storage=gs)
 dataset = ds['rcr_2M_chips']
 
 
-dataset.clone("/data/chips")
+dataset.clone(destination)
