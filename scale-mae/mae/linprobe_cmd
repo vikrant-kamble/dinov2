@@ -1,0 +1,1 @@
+torchrun --nproc-per-node=4 --standalone main_linprobe.py --config config/2m.yaml --checkpoint_path /data/laced-universe-9/checkpoint-latest.pth --eval_path /data/2m/val --eval_dataset 2m
