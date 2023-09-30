@@ -1,1 +1,5 @@
+#pip install kornia==0.6.12 torchgeo==0.4.1 wandb protobuf==3.20.3
+# export WANDB_API_KEY=
+# export WANDB_PROJECT="scale-mae"
+   
 torchrun --nproc-per-node=4 --standalone main_linprobe.py --config config/2m.yaml --checkpoint_path /data/laced-universe-9/checkpoint-latest.pth --eval_path /data/2m/val --eval_dataset 2m
