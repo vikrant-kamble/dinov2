@@ -88,7 +88,7 @@ def get_args_parser():
     # Model parameters
     parser.add_argument(
         "--model",
-        default="mae_vit_base_patch16",
+        default="vit_base_patch16",
         type=str,
         metavar="MODEL",
         help="Name of model to train",
@@ -330,16 +330,13 @@ def main(args):
         config = yaml.safe_load(f.read())
     args.data_config = config  # save on args so that it's prop'd to wandb
 
-    if config["data"]["type"] in ["fmow"]:
+    if config["data"]["type"] in ["fmow", "2m"]:
         # We read in an image from PIL and crop an area twice the size of input size
         # transforms_train crops it down to a the proper target_size
         transforms_init = tv_transforms.Compose(
             [
-                # tv_transforms.RandomCrop(args.input_size * 2, pad_if_needed=True),
-                # tv_transforms.Resize((args.input_size, args.input_size)),
-                tv_transforms.Resize(args.input_size),
-                # tv_transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),
-                tv_transforms.RandomCrop(args.input_size),
+                tv_transforms.Resize((512, 512)),
+                tv_transforms.RandomCrop(args.input_size * 2, pad_if_needed=True),
                 tv_transforms.RandomHorizontalFlip(),
                 tv_transforms.ToTensor(),
                 tv_transforms.Normalize(
@@ -564,8 +561,8 @@ def main(args):
             args.wandb_id = random_wandb_id
 
         wandb_args = dict(
-            project="fmow-ft",
-            entity="bair-climate-initiative",
+#             project="fmow-ft",
+#             entity="bair-climate-initiative",
             resume="allow",
             config=args.__dict__,
         )
