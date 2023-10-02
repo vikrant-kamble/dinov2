@@ -379,7 +379,7 @@ if __name__ == "__main__":
         help='Label smoothing for classifier model training',
         required=False,
         type=float,
-        default=0.3
+        default=0.1
     )
 
 
