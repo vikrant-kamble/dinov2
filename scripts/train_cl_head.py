@@ -171,11 +171,12 @@ class ImageNetDataModule(pl.LightningDataModule):
 
 # 2. Model Definition
 class ImageClassifier(pl.LightningModule):
-    def __init__(self, backbone_model, n_classes, weight_decay, dropout):
+    def __init__(self, backbone_model, n_classes, weight_decay, dropout, label_smoothing):
         super().__init__()
         self.backbone = backbone_model
         self.weight_decay = weight_decay
         self.dropout = dropout
+        self.label_smoothing = label_smoothing
         self.backbone.eval()  # Freeze the backbone model
         for param in self.backbone.parameters():
             param.requires_grad = False
@@ -214,7 +215,7 @@ class ImageClassifier(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        loss = nn.functional.cross_entropy(y_hat, y, label_smoothing=0.1, weight=torch.tensor([3.4, 3.7, 10.5, 12.7, 4.5, 22.0]))
+        loss = nn.functional.cross_entropy(y_hat, y, label_smoothing=self.label_smoothing, weight=torch.tensor([3.4, 3.7, 10.5, 12.7, 4.5, 22.0]))
         self.training_loss.append(loss)
         return loss
     
@@ -373,6 +374,14 @@ if __name__ == "__main__":
         type=float,
         default=0.3
     )
+    parser.add_argument(
+        '--labelsmoothing',
+        help='Label smoothing for classifier model training',
+        required=False,
+        type=float,
+        default=0.3
+    )
+
 
     parser.add_argument(
         '--epochs',
@@ -401,7 +410,7 @@ if __name__ == "__main__":
     data_dir = args.data
     data_module = ImageNetDataModule(data_dir, batch_size=args.batchsize, transform_kind='dinov2', val_fraction=args.valfraction)
     data_module.setup()
-    classifier_model = ImageClassifier(model, data_module.n_classes, args.weightdecay, args.dropout)
+    classifier_model = ImageClassifier(model, data_module.n_classes, args.weightdecay, args.dropout, args.labelsmoothing)
     
     neptune_logger = NeptuneLogger(
         api_key ="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiIwODViNzIxOC1jMjUyLTRhMGMtOWYwNi1kYjgxMGFkM2FhMjAifQ==",
