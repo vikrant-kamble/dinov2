@@ -214,7 +214,7 @@ class ImageClassifier(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        loss = nn.functional.cross_entropy(y_hat, y, label_smoothing=0.1)
+        loss = nn.functional.cross_entropy(y_hat, y, label_smoothing=0.1, weight=torch.tensor([3.4, 3.7, 10.5, 12.7, 4.5, 22.0]))
         self.training_loss.append(loss)
         return loss
     
