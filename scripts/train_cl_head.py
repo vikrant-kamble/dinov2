@@ -215,7 +215,8 @@ class ImageClassifier(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        loss = nn.functional.cross_entropy(y_hat, y, label_smoothing=self.label_smoothing, weight=torch.tensor([3.4, 3.7, 10.5, 12.7, 4.5, 22.0]).cuda())
+        train_weights = [5269, 10732, 5946, 5730, 13469, 2822]
+        loss = nn.functional.cross_entropy(y_hat, y, label_smoothing=self.label_smoothing, weight=torch.Tensor(1 / (pd.Series(train_weights).value_counts() / len(train_weights)).values).cuda())
         self.training_loss.append(loss)
         return loss
     
@@ -461,4 +462,8 @@ if __name__ == "__main__":
 
     results = trainer.test(classifier_model, dataloaders=data_module.test_dataloader())
     print(results)
+
+
+
+    #test_weights = [3331,3331,1105,913,2577,526]
 
