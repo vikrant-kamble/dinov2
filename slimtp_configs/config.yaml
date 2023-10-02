@@ -1,0 +1,112 @@
+hydra:
+  run:
+    dir: .
+  # the effective configurations are saved in the output_subdir (default .hydra)
+  output_subdir: ${output_directory}/run-configs
+
+output_directory: /cnvrg/output
+
+### loggers:
+loggers:
+  tensorboard:
+    save_dir: ${output_directory}/logs
+  cnvrg:
+    use: true
+    args: {}
+
+# Data index file
+# Various formats are supported, determined simply by the file extension.
+# Formats together with a few usage notes are listed in `slimtp.lib.data.write_dataframe`.
+data_index_path: ${output_directory}/preprocessing/data.h5
+
+### Datasplits
+datasplits:
+  trainval:
+    use: trainval
+    type: bedrock_chipper
+    datasets:
+      - format: png
+        path: /data/dino_fixed_rg_evaluation_slimtp/finetune_mtmv_nearmap_rg
+    val_fraction: 0.2
+    groupby: geometry_id  # column that uniquely identifies each AOI
+
+  test:
+    use: test
+    type: bedrock_chipper
+    datasets:
+      - format: png
+        path: /data/dino_fixed_rg_evaluation_slimtp/evaluate_mtmv_nearmap_rg
+    groupby: geometry_id  # column that uniquely identifies each AOI
+
+### Taxonomy
+taxonomy:
+  roof_geometry: "roof_geometry @ 2.0: model"
+
+
+# Path for the last checkpoint
+last_checkpoint_path: ${output_directory}/training/last.ckpt
+
+### Data loading
+size_initial: 298
+size_final: 260
+batch_size: 128
+vote_bootstrap: true
+vote_normalize: false
+
+### Model
+model_backbone: efficientnet-b2
+model_backbone_init: imagenet
+model_dropout_rate: 0.3
+
+### NST
+enable_nst: false
+nst_batch_size_ratio: 1
+nst_hard_labels: false
+teacher_backbone: efficientnet-b2
+teacher_model: None
+
+### Optimizers and LR schedulers
+optimizers:
+
+  # See :py:func:`slimtp.lib.optimizers.get_optimizer` for supported optimizers and their parameters
+  optimizer:
+    name: Ranger
+    learning_rate: 0.001
+    weight_decay: 0.01
+    amsgrad: false
+
+  # See :py:func:`slimtp.lib.optimizers.get_lr_scheduler` for supported LR schedulers and their parameters
+  lr_schedulers:
+    polynomial_decay_schedule_with_warmup:
+      warmup_steps: 150
+      power: 1.8
+
+### Trainer
+global_seed: 42
+loss:
+  # See :py:mod:`slimtp.lib.losses.classification`
+  name: ce
+  args: {}
+  #weights:
+  #  garage_presence:
+  #    with_garage: 0.2
+  #    no_garage: 0.4
+  #    unknown: 0.4
+
+trainer_args:
+  max_epochs: 10
+  precision: 16
+  amp_backend: native
+  strategy: ddp
+  multiple_trainloader_mode: min_size
+
+### Inference
+inference:
+  dataloaders: [test]
+  use_embeddings: false
+  snapshot_path: ${last_checkpoint_path}
+  tensors_path: ${output_directory}/inference/output_tensors.h5
+
+evaluation:
+  tensors_path: ${inference.tensors_path}
+  metrics_path: ${output_directory}/evaluation
