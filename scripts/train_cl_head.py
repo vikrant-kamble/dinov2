@@ -15,6 +15,11 @@ import cv2
 import numpy as np
 import math
 import sys
+import seaborn as sns
+import matplotlib.pyplot as plt
+import pandas as pd
+from neptune.types import File
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 sys.path.append("/cnvrg/")
 
 from omegaconf import OmegaConf
@@ -187,11 +192,14 @@ class ImageClassifier(pl.LightningModule):
             nn.Linear(256, n_classes)
         )
         
-        self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=n_classes, top_k=1)
+        self.accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=n_classes, top_k=1, average="micro")
         
         self.training_loss = []
         self.valid_loss = []
         self.valid_acc = []
+        self.test_step_y_hats = []
+        self.test_step_ys = []
+        self.n_classes = n_classes
 
     def forward(self, x, **kwargs):
 #         x = self.backbone(x)
@@ -221,8 +229,6 @@ class ImageClassifier(pl.LightningModule):
         
         return {'loss': loss, 'acc': acc}
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        return self(batch)
     def test_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
@@ -238,7 +244,37 @@ class ImageClassifier(pl.LightningModule):
 
         # log the outputs!
         self.log_dict({'test_loss': loss, 'test_acc': test_acc})
-    
+        self.test_step_y_hats.append(y_hat.softmax(dim=-1))
+        self.test_step_ys.append(y)
+        return {'preds': y_hat, 'targets': y}
+
+    def on_test_epoch_end(self):
+        y_hat = torch.cat(self.test_step_y_hats).cpu()
+        y = torch.cat(self.test_step_ys).cpu()
+        np.save("/cnvrg/y.npy", y.numpy())
+        np.save("/cnvrg/y_hat.npy", y_hat.numpy() )
+        cm = confusion_matrix(y.numpy(), y_hat.numpy().argmax(axis=1), labels=[0, 1, 2, 3, 4, 5])
+
+        title_size = 16
+        plt.rcParams.update({'font.size': 16})
+        display_labels = ['flat', 'gable', 'hip', 'mixed_w_wind_credit', 'mixed_wo_wind_credit',     'unknown']
+        colorbar = False
+        cmap = "Blues"  # Try "Greens". Change the color of the confusion matrix.
+        ## Please see other alternatives at https://matplotlib.org/stable/tutorials/colors/colormaps.html
+        values_format = ".3f"  # Determine the number of decimal places to be displayed.
+
+        # Create subplots for given confusion matrices
+        f, axes = plt.subplots(1, 1, figsize=(10, 16))
+
+        # Plot the first confusion matrix (Model 1) at position (0, 0)
+        axes.set_title("RG head", size=title_size)
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=display_labels).plot(
+            include_values=True, cmap=cmap, ax=axes, values_format=values_format)
+        axes.set_xticklabels(labels=display_labels, rotation=90)
+        disp.plot()
+        plt.show()
+        self.logger.experiment["test/confusion_matrix"].upload(File.as_image(f))
+
     def on_validation_epoch_end(self):
         avg_loss_val = torch.stack(self.valid_loss).mean()
         avg_acc = torch.stack(self.valid_acc).mean()
@@ -299,7 +335,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        '--subset', 
+        '--subset',
         help='How many data points to use. Use 0 to use them all',
         required=False,
         type=int,
@@ -351,6 +387,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     default_cfg = OmegaConf.create(dinov2_default_config)
+
     cfg = OmegaConf.load(args.config)
     cfg = OmegaConf.merge(default_cfg, cfg)
 
@@ -412,4 +449,7 @@ if __name__ == "__main__":
     
     trainer.fit(classifier_model, datamodule=data_module)
     classifier_model.eval()
-    trainer.test(classifier_model, dataloaders=data_module.test_dataloader())
+
+    results = trainer.test(classifier_model, dataloaders=data_module.test_dataloader())
+    print(results)
+

@@ -16,7 +16,7 @@ DESCRIPTION = "PyTorch code and models for the DINOv2 self-supervised learning m
 
 URL = "https://github.com/facebookresearch/dinov2"
 AUTHOR = "FAIR"
-REQUIRES_PYTHON = ">=3.9.0"
+REQUIRES_PYTHON = ">=3.8.0"
 HERE = Path(__file__).parent
 
 
