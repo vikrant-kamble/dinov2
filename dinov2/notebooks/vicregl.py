@@ -26,10 +26,11 @@ from lightly.data import LightlyDataset
 
 from benchmark_module import BenchmarkModule
 
-
+from neptune.utils import stringify_unsupported
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 
-from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.tuner.tuning import Tuner
 
 # In[3]:
 
@@ -51,192 +52,260 @@ from pytorch_lightning.callbacks import LearningRateMonitor
 
 
 class VICRegL(BenchmarkModule):
-    def __init__(self, dataloader_kNN, classes):
+# class VICRegL(pl.LightningModule):
+    def __init__(self, dataloader_kNN, classes, lr, wd, knn_k, knn_t=0.1):
         
-        super().__init__(dataloader_kNN, 1, classes, knn_k=16, knn_t=0.1)
+        super().__init__(dataloader_kNN, 1, classes, knn_k=knn_k, knn_t=knn_t)
+#         super().__init__()
         
-#         resnet = torchvision.models.resnet18()
-#         self.backbone = nn.Sequential(*list(resnet.children())[:-2])
+        resnet = torchvision.models.resnet101()
+        self.backbone = nn.Sequential(*list(resnet.children())[:-2])
 #         out_dim = 512 # resnet18
+        out_dim = 2048 # resnet101
         
-        convnext = torchvision.models.convnext_small()
-        convnext.classifier = nn.Identity()
-        self.backbone = convnext.features
+#         convnext = torchvision.models.convnext_small()
+#         convnext.classifier = nn.Identity()
+#         convnext.avgpool = nn.Identity()
+#         self.backbone = convnext.features
         
-        out_dim = 768 # convnext
+#         out_dim = 768 # convnext
         
         self.projection_head = BarlowTwinsProjectionHead(out_dim, 2048, 2048)
         self.local_projection_head = VicRegLLocalProjectionHead(out_dim, 128, 128)
         self.average_pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
         self.criterion = VICRegLLoss()
         
+        self.lr = lr
+        self.wd = wd
+    
     def forward(self, x):
-        return self.backbone(x)
-    
-    def get_features(self, x):
-        return self.average_pool(self.backbone(x))
-    
-    def _project(self, x):
         x = self.backbone(x)
         y = self.average_pool(x).flatten(start_dim=1)
         z = self.projection_head(y)
-        y_local = x.permute(0, 2, 3, 1).contiguous()  # (B, D, W, H) to (B, W, H, D)
+        y_local = x.permute(0, 2, 3, 1)  # (B, D, W, H) to (B, W, H, D)
         z_local = self.local_projection_head(y_local)
-        return z.contiguous(), z_local.contiguous()
+        return z, z_local
 
     def training_step(self, batch, batch_index):
         views_and_grids = batch[0]
         views = views_and_grids[: len(views_and_grids) // 2]
         grids = views_and_grids[len(views_and_grids) // 2 :]
-        features = [self._project(view) for view in views]
+        features = [self.forward(view) for view in views]
         loss = self.criterion(
             global_view_features=features[:2],
             global_view_grids=grids[:2],
             local_view_features=features[2:],
             local_view_grids=grids[2:],
-        ).contiguous()
+        )
         
         self.log('train/batch/loss', loss.detach().cpu())
         
         return loss
     
+#     def forward(self, x):
+#         return self.backbone(x)
+    
+#     def get_features(self, x):
+#         return self.average_pool(self.backbone(x))
+    
+#     def _project(self, x):
+#         x = self.backbone(x)
+#         y = self.average_pool(x).flatten(start_dim=1)
+#         z = self.projection_head(y)
+#         y_local = x.permute(0, 2, 3, 1).contiguous()  # (B, D, W, H) to (B, W, H, D)
+#         z_local = self.local_projection_head(y_local)
+#         return z.contiguous(), z_local.contiguous()
+
+#     def training_step(self, batch, batch_index):
+#         views_and_grids = batch[0]
+#         views = views_and_grids[: len(views_and_grids) // 2]
+#         grids = views_and_grids[len(views_and_grids) // 2 :]
+#         features = [self._project(view) for view in views]
+#         loss = self.criterion(
+#             global_view_features=features[:2],
+#             global_view_grids=grids[:2],
+#             local_view_features=features[2:],
+#             local_view_grids=grids[2:],
+#         ).contiguous()
+        
+#         self.log('train/batch/loss', loss.detach().cpu())
+        
+#         return loss
+    
     def configure_optimizers(self):
         
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4, weight_decay=5e-5)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.wd)
         
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs, eta_min=1e-6)
+#         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs, eta_min=1e-6)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer, max_lr=self.lr, total_steps=self.trainer.estimated_stepping_batches
+        )
         
-        return {"optimizer": optimizer, "lr_scheduler": scheduler}
+        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 
 
-transform = VICRegLTransform()
-
-val_transform = torchvision.transforms.Compose(
-    [
-        torchvision.transforms.Resize((224, 224)),
-        torchvision.transforms.ToTensor(),
-        torchvision.transforms.Normalize(
-            mean=utils.IMAGENET_NORMALIZE["mean"],
-            std=utils.IMAGENET_NORMALIZE["std"],
-        ),
-    ]
-)
-
-
-def split_dataset(dataset, frac):
-    num_train = int(frac * len(dataset))
-    indices = list(range(len(dataset)))  
-    one_indices, two_indices = indices[:num_train], indices[num_train:]
-
-    # Create Samplers and DataLoaders
-    split1_sampler = torch.utils.data.SubsetRandomSampler(one_indices)
-    split2_sampler = torch.utils.data.SubsetRandomSampler(two_indices)
+def split_dataset(full_dataset, frac):
+    train_size = int(frac * len(full_dataset))
+    test_size = len(full_dataset) - train_size
     
-    return split1_sampler, split2_sampler
-
-
-# In[4]:
-
-
-import pickle
-
-if os.path.exists("dataset_cache.pkl"):
+    train_dataset, test_dataset = torch.utils.data.random_split(full_dataset, [train_size, test_size])
     
-    with open("dataset_cache.pkl", "rb") as fp:
-        dataset, val_dataset = pickle.load(fp)
-
-else:
-    
-    val_dataset = torchvision.datasets.ImageFolder("/data/2m/val", transform=val_transform)
-    
-    dataset = LightlyDataset("/data/2m/train", transform=transform)
-    
-    with open("dataset_cache.pkl", "wb+") as fp:
-        pickle.dump([dataset, val_dataset], fp)
+    return train_dataset, test_dataset
 
 
-# train_sampler, _ = split_dataset(dataset, 0.99)
+def get_datasets():
+    
+    import pickle
+    
+    train_transform = VICRegLTransform()
+    
+    val_transform = torchvision.transforms.Compose(
+        [
+            torchvision.transforms.Resize((224, 224)),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(
+                mean=utils.IMAGENET_NORMALIZE["mean"],
+                std=utils.IMAGENET_NORMALIZE["std"],
+            ),
+        ]
+    )
+    
+    if os.path.exists("dataset_cache.pkl"):
+
+        with open("dataset_cache.pkl", "rb") as fp:
+            dataset, val_dataset = pickle.load(fp)
+
+    else:
+
+        val_dataset = torchvision.datasets.ImageFolder("/data/2m/val", transform=val_transform)
+
+        dataset = LightlyDataset("/data/2m/train", transform=train_transform)
+
+        with open("dataset_cache.pkl", "wb+") as fp:
+            pickle.dump([dataset, val_dataset], fp)
+    
+    return dataset, val_dataset
+
+
+if __name__ == "__main__":
+    
+    import argparse
+    
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--lr', type=float, required=False, default=0.0, 
+                        help='learning rate. If not provided, the LR finder will be used')
+
+    parser.add_argument('--epochs', type=int, required=True, 
+                        help='number of epochs')
+
+    parser.add_argument('--batch_size', type=int, required=True, 
+                        help='batch size')
+
+    parser.add_argument('--wd', type=float, required=True,
+                        help='weight decay')
+    parser.add_argument('--train_batches', type=int, required=False, default=1.0,
+                        help='Fraction of train batches or number of train batches to use. If not provided, use entire dataset.')
+    parser.add_argument('--k', type=int, required=True,
+                        help='Number of neighbors to consider in the KNN',
+                        default=20)
+
+    args = parser.parse_args()
+    
+    dataset, val_dataset = get_datasets()
         
-dataloader = torch.utils.data.DataLoader(
-    dataset,
-    batch_size=32,
-    shuffle=True,
-    drop_last=True,
-    num_workers=16,
-#     sampler=train_sampler
-)
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        drop_last=True,
+        num_workers=6,
+        pin_memory=True
+    #     sampler=train_sampler
+    )
 
-knn_train_sampler, knn_val_sampler = split_dataset(val_dataset, 0.8)
-
-
-knn_train_dataloader = torch.utils.data.DataLoader(
-    val_dataset,
-    batch_size=32,
-#     shuffle=True,
-    drop_last=False,
-    num_workers=16,
-    sampler=knn_train_sampler
-)
-
-knn_val_dataloader = torch.utils.data.DataLoader(
-    val_dataset,
-    batch_size=32,
-#     shuffle=True,
-    drop_last=False,
-    num_workers=16,
-    sampler=knn_val_sampler
-)
+    knn_train_dataset, knn_val_dataset = split_dataset(val_dataset, 0.8)
 
 
-# In[6]:
+    knn_train_dataloader = torch.utils.data.DataLoader(
+        knn_train_dataset,
+        batch_size=args.batch_size,
+    #     shuffle=True,
+        drop_last=True,
+        num_workers=6,
+        pin_memory=True
+    )
+
+    knn_val_dataloader = torch.utils.data.DataLoader(
+        knn_val_dataset,
+        batch_size=2,
+    #     shuffle=True,
+        drop_last=True,
+        num_workers=6,
+        pin_memory=True
+    )
+
+    neptune_logger = NeptuneLogger(
+        project="cape/dinov2",  
+        tags=["training", "vicregl"],  # optional
+    )
+    neptune_logger.experiment["args"] = stringify_unsupported(args)
+    
+    lr_monitor = LearningRateMonitor(logging_interval='step', log_momentum=True)
+
+    model = VICRegL(knn_train_dataloader, dataset.dataset.classes, args.lr, args.wd, args.k)
+    
+    checkpoint_callback = ModelCheckpoint(
+        every_n_epochs=1,
+        dirpath="checkpoints",
+        filename="vicreg-{epoch:02d}-{kNN_accuracy:.2f}",
+        save_on_train_epoch_end=True,
+        save_top_k=-1
+    )
+    
+    trainer = pl.Trainer(
+        max_epochs=args.epochs, 
+        devices='auto', 
+        accelerator='auto', 
+        precision='16-mixed', 
+        logger=neptune_logger,
+        callbacks=[lr_monitor, checkpoint_callback],
+        strategy="auto",
+        limit_train_batches=args.train_batches,
+        check_val_every_n_epoch=1,
+        num_sanity_val_steps=0
+    )
+    
+    # Create a Tuner
+    if args.lr == 0.0:
+        tuner = Tuner(trainer)
+
+        # finds learning rate automatically
+        # sets hparams.lr or hparams.learning_rate to that learning rate
+        tuner.lr_find(model, train_dataloaders=dataloader, val_dataloaders=knn_val_dataloader)
+    
+    model.active = True
+    
+    trainer.fit(model=model, train_dataloaders=dataloader, val_dataloaders=knn_val_dataloader)
 
 
-neptune_logger = NeptuneLogger(
-    project="cape/dinov2",  
-    tags=["training", "vicregl"],  # optional
-)
+    # In[9]:
+
+    try:
+        trainer.logger.experiment.stop()
+    except AttributeError:
+        pass
+
+    # In[10]:
 
 
-# In[7]:
+    import torch
 
 
-lr_monitor = LearningRateMonitor(logging_interval='step')
+    # In[11]:
 
 
-# In[8]:
-model = VICRegL(knn_train_dataloader, dataset.dataset.classes)
-
-accelerator = "gpu" # if torch.cuda.is_available() else "cpu"
-
-trainer = pl.Trainer(
-    max_epochs=10, 
-    devices='auto', 
-    accelerator=accelerator, 
-    precision='16-mixed', 
-    logger=neptune_logger,
-    callbacks=[lr_monitor]
-)
-
-trainer.fit(model=model, train_dataloaders=dataloader, val_dataloaders=knn_val_dataloader)
-
-
-# In[9]:
-
-try:
-    trainer.logger.experiment.stop()
-except AttributeError:
-    pass
-
-# In[10]:
-
-
-import torch
-
-
-# In[11]:
-
-
-torch.cuda.empty_cache()
+    torch.cuda.empty_cache()
 
 # In[29]:
 
