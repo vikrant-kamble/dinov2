@@ -114,8 +114,8 @@ num_workers = 4
 memory_bank_size = 4096
 
 # set max_epochs to 800 for long run (takes around 10h on a single V100)
-max_epochs = 10
-warmup = 1  # use 20 if epochs is 800 or 10 if epochs is 200
+max_epochs = 50
+warmup = 10  # use 20 if epochs is 800 or 10 if epochs is 200
 knn_k = 200
 knn_t = 0.1
 classes = 6
@@ -137,7 +137,7 @@ gather_distributed = True
 
 # benchmark
 n_runs = 1  # optional, increase to create multiple runs and report mean + std
-batch_size = 512
+batch_size = 256 * 4
 lr_factor = batch_size / 256  # scales the learning rate linearly with batch size
 
 # Number of devices and hardware to use for training.
@@ -145,7 +145,7 @@ devices = torch.cuda.device_count() if torch.cuda.is_available() else 1
 accelerator = "gpu" if torch.cuda.is_available() else "cpu"
 
 if distributed:
-    strategy = "auto"
+    strategy = "ddp"
     # reduce batch size for distributed training
     batch_size = batch_size // devices
 else:
@@ -1212,32 +1212,90 @@ class VICRegModel(BenchmarkModule):
         )
         return [optim], [cosine_scheduler]
 
+    
+class PretrainedVicRegL(nn.Module):
+    def __init__(self, backbone):
+        super().__init__()
+        
+        self.backbone = backbone
+    
+    def get_raw_features(self, x):
+        # Ref: https://github.com/facebookresearch/VICRegL/blob/803ae4c8cd1649a820f03afb4793763e95317620/convnext.py#L132
+        for i in range(4):
+            x = self.backbone.downsample_layers[i](x)
+            x = self.backbone.stages[i](x)
+        
+        return x
+    
+    def forward(self, x):
+        # This returns features for segmentation and for classification
+        # we ignore the former and return the latter
+        # source: https://github.com/facebookresearch/VICRegL/blob/803ae4c8cd1649a820f03afb4793763e95317620/evaluate.py#L314
+        _, x = self.backbone(x)
+        return x
+    
 
 class VICRegLModel(BenchmarkModule):
-    def __init__(self, dataloader_kNN, num_classes):
+    def __init__(self, dataloader_kNN, num_classes, finetune=True):
         super().__init__(dataloader_kNN, 1, num_classes, knn_k, knn_t)
-        # create a ResNet backbone and remove the classification head
-        resnet = torchvision.models.resnet50()
-        n_dim = 2048
+        
+        self.finetune = finetune
+        
+        if not finetune:
+            # create a ResNet backbone and remove the classification head
+            resnet = torchvision.models.resnet50()
+            n_dim = 2048
 
-        # The train_backbone variable is introduced in order to fit with the
-        # structure of BenchmarkModule. During training, train_backbone is used
-        # to extract local and global features. Durig evaluation, backbone is used
-        # to evaluate global features.
-        self.train_backbone = nn.Sequential(*list(resnet.children())[:-2])
+            # The train_backbone variable is introduced in order to fit with the
+            # structure of BenchmarkModule. During training, train_backbone is used
+            # to extract local and global features. Durig evaluation, backbone is used
+            # to evaluate global features.
+            self.train_backbone = nn.Sequential(*list(resnet.children())[:-2])
+            self.backbone = nn.Sequential(self.train_backbone, self.average_pool)
+        
+            self.base_lr = 0.3
+        else:
+            model = torch.hub.load(
+                'facebookresearch/vicregl:main', 'convnext_small_alpha0p9'
+            )
+            
+            n_dim = 768
+            
+            self.backbone = PretrainedVicRegL(model)
+            self.backbone.requires_grad = False
+            self.base_lr = 1e-3
+        
+        self.average_pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
         self.projection_head = heads.BarlowTwinsProjectionHead(n_dim, 2048, 2048)
         self.local_projection_head = heads.VicRegLLocalProjectionHead(n_dim, 128, 128)
-        self.average_pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
         self.criterion = VICRegLLoss(num_matches=(16, 4))
-        self.backbone = nn.Sequential(self.train_backbone, self.average_pool)
+        
+        self.n_epochs = 0
+        
         self.warmup_epochs = warmup
-
+    
+    def on_train_epoch_end(self):
+        self.n_epochs += 1
+    
     def forward(self, x):
-        x = self.train_backbone(x)
+        
+        if self.finetune:
+            # During the first few epochs we don't propagate the gradient
+            # through the backbone
+            if self.n_epochs < 5:
+                with torch.no_grad():
+                    x = self.backbone.get_raw_features(x)
+            else:
+                x = self.backbone.get_raw_features(x)
+        else:
+            x = self.train_backbone(x)
+        
         y = self.average_pool(x).flatten(start_dim=1)
         z = self.projection_head(y)
+        
         y_local = x.permute(0, 2, 3, 1)  # (B, D, H, W) to (B, H, W, D)
         z_local = self.local_projection_head(y_local)
+        
         return z, z_local
 
     def training_step(self, batch, batch_index):
@@ -1257,12 +1315,12 @@ class VICRegLModel(BenchmarkModule):
         # Training diverges without LARS
         optim = LARS(
             self.parameters(),
-            lr=0.3 * lr_factor,
+            lr=self.base_lr * lr_factor,
             weight_decay=1e-4,
             momentum=0.9,
         )
         cosine_scheduler = scheduler.CosineWarmupScheduler(
-            optim, self.warmup_epochs, max_epochs
+            optim, self.warmup_epochs, max_epochs, verbose=True
         )
         return [optim], [cosine_scheduler]
 
@@ -1469,8 +1527,9 @@ for BenchmarkModel in models:
             sync_batchnorm=sync_batchnorm,
             logger=logger,
             callbacks=[checkpoint_callback],
-#             num_sanity_val_steps=0,
+            num_sanity_val_steps=0,
             val_check_interval=0.1,
+            precision='16' 
             
         )
         start = time.time()

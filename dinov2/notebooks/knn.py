@@ -11,7 +11,54 @@ from lightly.data import LightlyDataset
 from lightly.transforms.utils import IMAGENET_NORMALIZE
 from lightly.utils.benchmarking import KNNClassifier, MetricCallback
 from lightly.utils.dist import print_rank_zero
+from lightly.models.modules import BarlowTwinsProjectionHead
+from lightly.models.modules.heads import VicRegLLocalProjectionHead
+from lightly.loss import VICRegLLoss
 
+import pytorch_lightning as pl
+import torch
+import torchvision
+from torch import nn
+
+
+class VICRegLMinimal(pl.LightningModule):
+    def __init__(self):
+        
+#         super().__init__(dataloader_kNN, 1, classes, knn_k=knn_k, knn_t=knn_t)
+        super().__init__()
+        
+        resnet = torchvision.models.resnet101()
+        self.backbone = nn.Sequential(*list(resnet.children())[:-2])
+#         out_dim = 512 # resnet18
+        out_dim = 2048 # resnet101
+        
+#         convnext = torchvision.models.convnext_small()
+#         convnext.classifier = nn.Identity()
+#         convnext.avgpool = nn.Identity()
+#         self.backbone = convnext.features
+        
+#         out_dim = 768 # convnext
+        
+        self.projection_head = BarlowTwinsProjectionHead(out_dim, 2048, 2048)
+        self.local_projection_head = VicRegLLocalProjectionHead(out_dim, 128, 128)
+        self.average_pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
+        self.criterion = VICRegLLoss()
+    
+    def forward(self, x):
+        x = self.backbone(x)
+        y = self.average_pool(x).flatten(start_dim=1)
+        z = self.projection_head(y)
+        y_local = x.permute(0, 2, 3, 1)  # (B, D, W, H) to (B, W, H, D)
+        z_local = self.local_projection_head(y_local)
+        return z#, z_local
+    
+#     def forward(self, x):
+#         x = self.backbone(x)
+#         y = self.average_pool(x).flatten(start_dim=1)
+#         z = self.projection_head(y)
+#         y_local = x.permute(0, 2, 3, 1).contiguous()  # (B, D, W, H) to (B, W, H, D)
+#         z_local = self.local_projection_head(y_local)
+#         return z.contiguous(), z_local.contiguous()
 
 def knn_eval(
     model: LightningModule,
@@ -40,10 +87,12 @@ def knn_eval(
     # Setup training data.
     transform = T.Compose(
         [
-            T.Resize(256),
-            T.CenterCrop(224),
+            T.Resize((224, 224)),
             T.ToTensor(),
-            T.Normalize(mean=IMAGENET_NORMALIZE["mean"], std=IMAGENET_NORMALIZE["std"]),
+            T.Normalize(
+                mean=IMAGENET_NORMALIZE["mean"],
+                std=IMAGENET_NORMALIZE["std"],
+            ),
         ]
     )
     train_dataset = LightlyDataset(input_dir=str(train_dir), transform=transform)
@@ -89,7 +138,7 @@ def knn_eval(
         max_epochs=1,
         accelerator=accelerator,
         devices=devices,
-        logger=TensorBoardLogger(save_dir=str(log_dir), name="knn_eval"),
+#         logger=TensorBoardLogger(save_dir=str(log_dir), name="knn_eval"),
         callbacks=[
             DeviceStatsMonitor(),
             metric_callback,
@@ -106,3 +155,31 @@ def knn_eval(
         print_rank_zero(f"knn {metric}: {max(metric_callback.val_metrics[metric])}")
     
     return max(metric_callback.val_metrics["val_top1"])
+
+
+if __name__ == "__main__":
+    
+    import argparse
+    
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--checkpoint', type=str, required=True,
+                        help='Path to checkpoint')
+
+    args = parser.parse_args()
+    
+    model = VICRegLMinimal.load_from_checkpoint(args.checkpoint)
+    model.eval()
+    
+    knn_eval(
+        model=model, 
+        train_dir="/data/2m/val/", 
+#         val_dir="/data/2m/val", 
+        log_dir=".", 
+        batch_size_per_device=64, 
+        num_workers=1, 
+        accelerator='gpu', 
+        devices=1, 
+        num_classes=6,
+    )
+    
