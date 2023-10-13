@@ -68,7 +68,12 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torchvision
-from pl_bolts.optimizers.lars import LARS
+
+try:
+    from pl_bolts.optimizers.lars import LARS
+except ImportError:
+    print("\n\nWARNING: no lightning bolts installed, you cannot train!!\n\n")
+    
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from lightly.data import LightlyDataset
@@ -247,14 +252,6 @@ def split_dataset(full_dataset, frac):
     train_dataset, test_dataset = torch.utils.data.random_split(full_dataset, [train_size, test_size])
     
     return train_dataset, test_dataset
-
-
-# we use test transformations for getting the feature for kNN on train data
-# dataset_train_kNN = LightlyDataset(input_dir=path_to_train, transform=test_transforms)
-
-dataset_test_whole = torchvision.datasets.ImageFolder(path_to_test, transform=test_transforms)
-
-dataset_train_kNN, dataset_test = split_dataset(dataset_test_whole, 0.8)
 
 
 def create_dataset_train_ssl(model):
@@ -1005,9 +1002,6 @@ class PMSNModel(BenchmarkModule):
         return [optim], [cosine_scheduler]
 
 
-from sklearn.cluster import KMeans
-
-
 class SMoGModel(BenchmarkModule):
     def __init__(self, dataloader_kNN, num_classes):
         super().__init__(dataloader_kNN, num_classes)
@@ -1036,6 +1030,9 @@ class SMoGModel(BenchmarkModule):
         self.criterion = nn.CrossEntropyLoss()
 
     def _cluster_features(self, features: torch.Tensor) -> torch.Tensor:
+        
+        from sklearn.cluster import KMeans
+        
         features = features.cpu().numpy()
         kmeans = KMeans(self.n_groups).fit(features)
         clustered = torch.from_numpy(kmeans.cluster_centers_).float()
@@ -1279,6 +1276,8 @@ class VICRegLModel(BenchmarkModule):
     
     def forward(self, x):
         
+        raise RuntimeError("SHOULD NOT GET HERE")
+        
         if self.finetune:
             # During the first few epochs we don't propagate the gradient
             # through the backbone
@@ -1466,123 +1465,133 @@ class SwaVQueueModel(BenchmarkModule):
         return [optim], [cosine_scheduler]
 
 
-models = [
-#     BarlowTwinsModel,
-#     BYOLModel,
-#     DCL,
-#     DCLW,
-#     DINOModel,
-#     FastSiamModel,
-#     # MAEModel, # disabled by default because MAE uses larger images with size 224
-#     MSNModel,
-#     MocoModel,
-#     NNCLRModel,
-#     PMSNModel,
-#     SimCLRModel,
-#     # SimMIMModel, # disabled by default because SimMIM uses larger images with size 224
-#     SimSiamModel,
-#     SwaVModel,
-#     SwaVQueueModel,
-#     SMoGModel,
-#     TiCoModel,
-#     VICRegModel,
-    VICRegLModel,
-]
-bench_results = dict()
+if __name__ == "__main__":
+    
+    # we use test transformations for getting the feature for kNN on train data
+    # dataset_train_kNN = LightlyDataset(input_dir=path_to_train, transform=test_transforms)
 
-experiment_version = None
-# loop through configurations and train models
-for BenchmarkModel in models:
-    runs = []
-    model_name = BenchmarkModel.__name__.replace("Model", "")
-    for seed in range(n_runs):
-        pl.seed_everything(seed)
-        dataset_train_ssl = create_dataset_train_ssl(BenchmarkModel)
-        dataloader_train_ssl, dataloader_train_kNN, dataloader_test = get_data_loaders(
-            batch_size=batch_size, dataset_train_ssl=dataset_train_ssl
-        )
-        benchmark_model = BenchmarkModel(dataloader_train_kNN, classes)
+    dataset_test_whole = torchvision.datasets.ImageFolder(path_to_test, transform=test_transforms)
 
-        # Save logs to: {CWD}/benchmark_logs/cifar10/{experiment_version}/{model_name}/
-        # If multiple runs are specified a subdirectory for each run is created.
-        sub_dir = model_name if n_runs <= 1 else f"{model_name}/run{seed}"
-        logger = TensorBoardLogger(
-            save_dir=os.path.join(logs_root_dir, "imagenette"),
-            name="",
-            sub_dir=sub_dir,
-            version=experiment_version,
-        )
-        if experiment_version is None:
-            # Save results of all models under same version directory
-            experiment_version = logger.version
-        checkpoint_callback = pl.callbacks.ModelCheckpoint(
-            dirpath=os.path.join(logger.log_dir, "checkpoints")
-        )
-        trainer = pl.Trainer(
-            max_epochs=max_epochs,
-            devices=devices,
-            accelerator=accelerator,
-            default_root_dir=logs_root_dir,
-            strategy=strategy,
-            sync_batchnorm=sync_batchnorm,
-            logger=logger,
-            callbacks=[checkpoint_callback],
-            num_sanity_val_steps=0,
-            val_check_interval=0.1,
-            precision='16' 
-            
-        )
-        start = time.time()
-        trainer.fit(
-            benchmark_model,
-            train_dataloaders=dataloader_train_ssl,
-            val_dataloaders=dataloader_test,
-        )
-        end = time.time()
-        run = {
-            "model": model_name,
-            "batch_size": batch_size,
-            "epochs": max_epochs,
-            "max_accuracy": benchmark_model.max_accuracy,
-            "runtime": end - start,
-            "gpu_memory_usage": torch.cuda.max_memory_allocated(),
-            "seed": seed,
-        }
-        runs.append(run)
-        print(run)
+    dataset_train_kNN, dataset_test = split_dataset(dataset_test_whole, 0.8)
 
-        # delete model and trainer + free up cuda memory
-        del benchmark_model
-        del trainer
-        torch.cuda.reset_peak_memory_stats()
-        torch.cuda.empty_cache()
+    
+    models = [
+    #     BarlowTwinsModel,
+    #     BYOLModel,
+    #     DCL,
+    #     DCLW,
+    #     DINOModel,
+    #     FastSiamModel,
+    #     # MAEModel, # disabled by default because MAE uses larger images with size 224
+    #     MSNModel,
+    #     MocoModel,
+    #     NNCLRModel,
+    #     PMSNModel,
+    #     SimCLRModel,
+    #     # SimMIMModel, # disabled by default because SimMIM uses larger images with size 224
+    #     SimSiamModel,
+    #     SwaVModel,
+    #     SwaVQueueModel,
+    #     SMoGModel,
+    #     TiCoModel,
+    #     VICRegModel,
+        VICRegLModel,
+    ]
+    bench_results = dict()
 
-    bench_results[model_name] = runs
+    experiment_version = None
+    # loop through configurations and train models
+    for BenchmarkModel in models:
+        runs = []
+        model_name = BenchmarkModel.__name__.replace("Model", "")
+        for seed in range(n_runs):
+            pl.seed_everything(seed)
+            dataset_train_ssl = create_dataset_train_ssl(BenchmarkModel)
+            dataloader_train_ssl, dataloader_train_kNN, dataloader_test = get_data_loaders(
+                batch_size=batch_size, dataset_train_ssl=dataset_train_ssl
+            )
+            benchmark_model = BenchmarkModel(dataloader_train_kNN, classes)
 
-# print results table
-header = (
-    f"| {'Model':<13} | {'Batch Size':>10} | {'Epochs':>6} "
-    f"| {'KNN Test Accuracy':>18} | {'Time':>10} | {'Peak GPU Usage':>14} |"
-)
-print("-" * len(header))
-print(header)
-print("-" * len(header))
-for model, results in bench_results.items():
-    runtime = np.array([result["runtime"] for result in results])
-    runtime = runtime.mean() / 60  # convert to min
-    accuracy = np.array([result["max_accuracy"] for result in results])
-    gpu_memory_usage = np.array([result["gpu_memory_usage"] for result in results])
-    gpu_memory_usage = gpu_memory_usage.max() / (1024**3)  # convert to gbyte
+            # Save logs to: {CWD}/benchmark_logs/cifar10/{experiment_version}/{model_name}/
+            # If multiple runs are specified a subdirectory for each run is created.
+            sub_dir = model_name if n_runs <= 1 else f"{model_name}/run{seed}"
+            logger = TensorBoardLogger(
+                save_dir=os.path.join(logs_root_dir, "imagenette"),
+                name="",
+                sub_dir=sub_dir,
+                version=experiment_version,
+            )
+            if experiment_version is None:
+                # Save results of all models under same version directory
+                experiment_version = logger.version
+            checkpoint_callback = pl.callbacks.ModelCheckpoint(
+                dirpath=os.path.join(logger.log_dir, "checkpoints")
+            )
+            trainer = pl.Trainer(
+                max_epochs=max_epochs,
+                devices=devices,
+                accelerator=accelerator,
+                default_root_dir=logs_root_dir,
+                strategy=strategy,
+                sync_batchnorm=sync_batchnorm,
+                logger=logger,
+                callbacks=[checkpoint_callback],
+                num_sanity_val_steps=0,
+                val_check_interval=0.1,
+                precision='16' 
 
-    if len(accuracy) > 1:
-        accuracy_msg = f"{accuracy.mean():>8.3f} +- {accuracy.std():>4.3f}"
-    else:
-        accuracy_msg = f"{accuracy.mean():>18.3f}"
+            )
+            start = time.time()
+            trainer.fit(
+                benchmark_model,
+                train_dataloaders=dataloader_train_ssl,
+                val_dataloaders=dataloader_test,
+            )
+            end = time.time()
+            run = {
+                "model": model_name,
+                "batch_size": batch_size,
+                "epochs": max_epochs,
+                "max_accuracy": benchmark_model.max_accuracy,
+                "runtime": end - start,
+                "gpu_memory_usage": torch.cuda.max_memory_allocated(),
+                "seed": seed,
+            }
+            runs.append(run)
+            print(run)
 
-    print(
-        f"| {model:<13} | {batch_size:>10} | {max_epochs:>6} "
-        f"| {accuracy_msg} | {runtime:>6.1f} Min "
-        f"| {gpu_memory_usage:>8.1f} GByte |",
-        flush=True,
+            # delete model and trainer + free up cuda memory
+            del benchmark_model
+            del trainer
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.empty_cache()
+
+        bench_results[model_name] = runs
+
+    # print results table
+    header = (
+        f"| {'Model':<13} | {'Batch Size':>10} | {'Epochs':>6} "
+        f"| {'KNN Test Accuracy':>18} | {'Time':>10} | {'Peak GPU Usage':>14} |"
     )
-print("-" * len(header))
+    print("-" * len(header))
+    print(header)
+    print("-" * len(header))
+    for model, results in bench_results.items():
+        runtime = np.array([result["runtime"] for result in results])
+        runtime = runtime.mean() / 60  # convert to min
+        accuracy = np.array([result["max_accuracy"] for result in results])
+        gpu_memory_usage = np.array([result["gpu_memory_usage"] for result in results])
+        gpu_memory_usage = gpu_memory_usage.max() / (1024**3)  # convert to gbyte
+
+        if len(accuracy) > 1:
+            accuracy_msg = f"{accuracy.mean():>8.3f} +- {accuracy.std():>4.3f}"
+        else:
+            accuracy_msg = f"{accuracy.mean():>18.3f}"
+
+        print(
+            f"| {model:<13} | {batch_size:>10} | {max_epochs:>6} "
+            f"| {accuracy_msg} | {runtime:>6.1f} Min "
+            f"| {gpu_memory_usage:>8.1f} GByte |",
+            flush=True,
+        )
+    print("-" * len(header))

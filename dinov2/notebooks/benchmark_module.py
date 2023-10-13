@@ -104,6 +104,8 @@ class BenchmarkModule(pl.LightningModule):
         self.feature_bank = []
         self.targets_bank = []
         self.outputs = []
+        self.inference_features = []
+        self.inference_targets = []
     
     @log_function
     @rank_zero_only
@@ -111,10 +113,14 @@ class BenchmarkModule(pl.LightningModule):
         
         images, targets = batch
         feature = self.backbone(images).squeeze()
-        feature = F.normalize(feature, dim=1)         
-        pred_labels = knn_predict(feature.cpu(), self.feature_bank, self.targets_bank, self.classes, self.knn_k, self.knn_t)
+        feature = F.normalize(feature, dim=1).cpu()
+        targets = targets.cpu()
+        pred_labels = knn_predict(feature, self.feature_bank, self.targets_bank, self.classes, self.knn_k, self.knn_t)
         num = images.size(0)
-        top1 = (pred_labels[:, 0] == targets.cpu()).float().sum().item()
+        top1 = (pred_labels[:, 0] == targets).float().sum().item()
+        
+        self.inference_features.append(feature)
+        self.inference_targets.append(targets)
         self.outputs.append((num, top1))
     
     @log_function
@@ -145,6 +151,8 @@ class BenchmarkModule(pl.LightningModule):
     @rank_zero_only
     def on_validation_epoch_end(self):
         
+        print(f"Feature bank shape: {self.feature_bank.shape}")
+        
         total_num = 0
         total_top1 = 0.
 
@@ -157,5 +165,8 @@ class BenchmarkModule(pl.LightningModule):
             self.max_accuracy = acc
 
         self.log('kNN_accuracy', acc * 100.0, prog_bar=True, rank_zero_only=True)
-                
-        self._reset()
+        
+        self.inference_features = torch.cat(self.inference_features, dim=0).t().cpu().contiguous()
+        self.inference_targets = torch.cat(self.inference_targets, dim=0).t().cpu().contiguous()
+        
+#         self._reset()
