@@ -5,8 +5,8 @@ pip install fvcore
 pip install xformers==0.0.18
 python /cnvrg/scripts/dino_embedding_creation.py --data /data/dino_fixed_rg_evaluation_imagenet --config /cnvrg/output/dino_checkpoint/config.yaml --checkpoint /cnvrg/output/dino_checkpoint/teacher_checkpoint.pth --outpath /cnvrg/output/rgevaluation;
 cd /cnvrg/output/rgevaluation/embeddings;
-cnvrgv2 dataset create -n $3;
-cnvrgv2 dataset put -n $3 -f .
+yes | cnvrgv2 dataset create -n $3;
+yes | cnvrgv2 dataset put -n $3 -f .
 
 # $2  gs://cape-ml-projects-data/data_stores/dinov2/experiments/a100x4/DIN-145/config.yaml
 # $1  gs://cape-ml-projects-data/data_stores/dinov2/experiments/a100x4/DIN-145/eval/training_112499/teacher_checkpoint.pth
