@@ -470,7 +470,7 @@ def train(
             names = [str(v) for v in ci.vocab]
             classification_report = skm.classification_report(targs, decoded, labels=list(ci.vocab.o2i.values()), target_names=names, output_dict=True)
             config['report'] = classification_report
-            with open(f"{root}_complete_results.json", "w+") as fp:
+            with open(f"{root_name}_complete_results.json", "w+") as fp:
                 json.dump(config, fp)
             
         else:
