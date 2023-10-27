@@ -346,11 +346,71 @@ def get_vicreg_model(config):
         head[-1].bias.data.zero_()
         # model = nn.Sequential(backbone, head)
         model = ModelWrapper(backbone, head)
-        backbone.requires_grad_(config['finetune'])
-        head.requires_grad_(True)
+        model.backbone.requires_grad_(config['finetune'])
+        model.head.requires_grad_(True)
     
     return model
+
+
+class Dinov2ModelWrapper(nn.Module):
     
+    def __init__(self, backbone, head):
+        super().__init__()
+        self.backbone = backbone
+        self.head = head
+
+    def forward(self, input_):
+        return self.head(self.backbone(input_))
+
+    
+def dinov2_splitter(model):
+    
+    groups = [
+        params(model.backbone.patch_embed)
+    ]
+    
+    for i in range(4):
+        these_params = params(model.backbone.blocks[i])
+        groups.append(these_params)
+    
+    groups.append(params(model.backbone.norm))
+    groups.append(params(model.head))
+    
+    return groups
+
+
+def get_dinov2_model(config):
+    
+    from omegaconf import OmegaConf
+    from dinov2.configs import dinov2_default_config
+    from dinov2.eval.setup import build_model_for_eval
+    from dinov2.eval.linear import create_linear_input
+
+    default_cfg = OmegaConf.create(dinov2_default_config)
+    
+    checkpoint_dir = os.path.dirname(config['checkpoint'])
+
+    cfg = OmegaConf.load(f"{checkpoint_dir}/config.yaml")
+
+    backbone = build_model_for_eval(cfg, config['checkpoint'])
+    backbone.eval()
+    
+    embedding = 1024
+    
+    head = nn.Sequential(
+            nn.Dropout(config.get('linear_layer_dropout', 0.5)), 
+            nn.Linear(embedding, config['n_classes'])
+        )
+    head[-1].weight.data.normal_(mean=0.0, std=0.01)
+    head[-1].bias.data.zero_()
+    
+    # model = nn.Sequential(backbone, head)
+    model = Dinov2ModelWrapper(backbone, head)
+    model.backbone.requires_grad_(config['finetune'])
+    model.head.requires_grad_(True)
+    
+    return model
+
 
 def train(
     config,
@@ -387,6 +447,8 @@ def train(
     
     if config['model_type'] == 'vicregl':
         model = get_vicreg_model(config)
+    elif config['model_type'] == 'dinov2':
+        model = get_dinov2_model(config)
     else:
         model = timm.create_model(
             config['model_type'], 
@@ -403,6 +465,8 @@ def train(
     
     if config['model_type'] == 'vicregl':
         learn.splitter = vicreg_splitter
+    elif config['model_type'] == 'dinov2':
+        learn.splitter = dinov2_splitter
         
     with learn.distrib_ctx(sync_bn=True, in_notebook=False):
         
