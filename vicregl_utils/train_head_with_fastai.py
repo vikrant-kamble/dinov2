@@ -21,6 +21,7 @@ import json
 import albumentations as aug
 from albumentations.pytorch.transforms import ToTensorV2
 import cv2
+import math
 
 from sklearn.metrics import ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
@@ -32,6 +33,43 @@ from collections import Counter
 
 import tqdm
 import functools
+import hashlib
+
+
+def cache_dataframe_to_disk(func):
+    
+    os.makedirs("__cache", exist_ok=True)
+    
+    @functools.wraps(func)
+    def wrapper(paths):
+        
+        # Compute hash
+        m = hashlib.md5()
+        [m.update(str(s).encode()) for s in paths]
+        key = m.hexdigest()
+        
+        cache_file = f"__cache/{key}.hd5"
+        
+        if os.environ.get("RANK") is not None:
+            if not os.environ['RANK'] == '0':
+                # Wait for process 0 to populate the cache
+                while True:
+                    if not os.path.exists(cache_file):
+                        time.sleep(0.5)
+                    else:
+                        break
+        
+        if os.path.exists(cache_file):
+            return pd.read_hdf(cache_file)
+        else:
+            
+            df = func(paths)
+            df.to_hdf(cache_file, "cache")
+            
+            return df
+
+    return wrapper
+
 
 
 class AlbumentationsTransform(RandTransform):
@@ -69,9 +107,10 @@ def get_train_transforms(size_initial=256, size_final=224):
                 aug.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.4, p=0.5),
                 aug.OneOf(
                     [
+                        aug.ShiftScaleRotate(),
                         aug.GaussianBlur(),
                         aug.MotionBlur(),
-                        aug.Downscale(interpolation=cv2.INTER_NEAREST),
+#                         aug.Downscale(interpolation=cv2.INTER_NEAREST),
                         aug.ImageCompression(30, 100),
                     ],
                     p=0.25,
@@ -110,10 +149,11 @@ def get_weights(path, lbl_dict):
 
 # def label_func(fname, lbl_dict):
 #     return lbl_dict[parent_label(fname)]
-@functools.cache
+#@functools.cache
+@cache_dataframe_to_disk
 def get_items(path_tuple):
     
-    train_path, val_path = path_tuple
+    train_path, val_path, fraction = path_tuple
     
     _paths = {
         'train': train_path,
@@ -127,19 +167,35 @@ def get_items(path_tuple):
 
     for split, df in zip(['train', 'val'], [train_votes, val_votes]):
         
-        groups = df.groupby(['attribute_geometry_id', 'imagery_source'])
+        if split == 'val':
+            # Do not subsample the validation
+            frac = 1
+        else:
+            frac = fraction
+            print(f"Using {frac * 100}% of the training dataset")
+            
+        groups = df.sample(frac=1).groupby(['attribute_geometry_id', 'imagery_source'])
         
-        for _, grp_df in tqdm.tqdm(groups, total=len(groups)):
+        n_processed = 0
+        
+        for _, grp_df in tqdm.tqdm(groups, total=math.ceil(len(groups) * frac)):
 
             rows.append(
                 {
-                    "label_counts": grp_df.geometry_labels.value_counts(),
+                    "label": grp_df.geometry_labels.value_counts().idxmax(),
                     "filename": f"{_paths[split]}/chips/{grp_df['filename'].iloc[0]}",
                     "is_valid": split == 'val'
                 }
             )
-
-    return pd.DataFrame(rows)
+            
+            n_processed += 1
+            
+            if n_processed >= frac * len(groups):
+                break
+    
+    result_df = pd.DataFrame(rows)
+    print(f"Final dataset has {result_df.shape[0]} entries")
+    return result_df
 
 
 def get_x(row):
@@ -150,7 +206,7 @@ def get_x(row):
 def get_y(row):
     
     # Return majority voting for now
-    return row['label_counts'].idxmax()
+    return row['label']
 
 
 def get_dataloaders(config):
@@ -187,24 +243,24 @@ def get_dataloaders(config):
                                           std=[0.229, 0.224, 0.225])
     )
     
-    if config['stratified_batches']:
+    if config['poor_severe_weight'] != 1:
         
-        df = get_items((config['train_path'], config['val_path']))
-        maj_labels = [get_y({'label_counts': item}) for item in df['label_counts']]
+        df = get_items((config['train_path'], config['val_path'], config['train_fraction']))
+        maj_labels = [get_y({'label': item}) for item in df['label']]
         weights_lookup = {
-            '1_severe': 2,
-            '2_poor': 2
+            '1_severe': config['poor_severe_weight'],
+            '2_poor': config['poor_severe_weight']
         }
         wgts = [weights_lookup.get(k, 1) for k in maj_labels]
         
         dls = dblock.weighted_dataloaders(
-            (config['train_path'], config['val_path']),
+            (config['train_path'], config['val_path'], config['train_fraction']),
             batch_size=config['batch_size'], 
             wgts=wgts
         )
     else:
         dls = dblock.dataloaders(
-            (config['train_path'], config['val_path']),
+            (config['train_path'], config['val_path'], config['train_fraction']),
             batch_size=config['batch_size']
         )
     
@@ -237,7 +293,21 @@ def add_fastai_head(backbone, config):
     )
 
 
-def get_vicreg_model(checkpoint, config):
+def vicreg_splitter(model):
+    
+    groups = []
+    
+    for i in range(4):
+        these_params = params(model.backbone.downsample_layers[i])
+        these_params.extend(params(model.backbone.stages[i]))
+        groups.append(these_params)
+    
+    groups.append(params(model.head))
+    
+    return groups
+
+
+def get_vicreg_model(config):
     
     import convnext
     
@@ -246,7 +316,7 @@ def get_vicreg_model(checkpoint, config):
         layer_scale_init_value=0.0,
     )
         
-    state_dict = torch.load(checkpoint, map_location="cpu")
+    state_dict = torch.load(config['checkpoint'], map_location="cpu")
     if "model" in state_dict:
         state_dict = state_dict["model"]
         state_dict = {
@@ -262,56 +332,50 @@ def get_vicreg_model(checkpoint, config):
 
         model = add_fastai_head(backbone, config)
 
-        model[0].requires_grad_(False)
+        model[0].requires_grad_(config['finetune'])
     
     else:
     
-        head = nn.Linear(embedding, config['n_classes'])
-        head.weight.data.normal_(mean=0.0, std=0.01)
-        head.bias.data.zero_()
+        head = nn.Sequential(
+            nn.Dropout(config.get('linear_layer_dropout', 0.5)), 
+            nn.Linear(embedding, config['n_classes'])
+        )
+        head[-1].weight.data.normal_(mean=0.0, std=0.01)
+        head[-1].bias.data.zero_()
         # model = nn.Sequential(backbone, head)
         model = ModelWrapper(backbone, head)
-        backbone.requires_grad_(True)
+        backbone.requires_grad_(config['finetune'])
         head.requires_grad_(True)
     
     return model
-
+    
 
 def train(
-    train_path,
-    val_path,
-    model_type, 
-    checkpoint, 
-    convnext_arch, 
-    batch_size=256,
-    lr=2e-3, 
-    n_epochs=5, 
-    dp1=0.2, 
-    dp2=0.5, 
-    size_of_linear_layer=512, 
-    fastai_head=False,
-    stratified_batches=True,
-    run_id=0,
-    callbacks=[],
-    save_checkpoint=False
+    config,
+    callbacks=[SaveModelCallback()],
+    save_checkpoint=False,
 ):
     
 #     lbl_dict = get_lbl_dict(train_path)
     
-    config = {
-        "batch_size": batch_size,
-        "lr": lr,
-        "n_epochs": n_epochs,
-        "dropout_1": dp1, 
-        "dropout_2": dp2, 
-        "size_of_linear_layer": size_of_linear_layer,
-        "n_classes": None,
-        "convnext_arch": convnext_arch,
-        "fastai_head": fastai_head,
-        "stratified_batches": stratified_batches,
-        "train_path": train_path,
-        "val_path": val_path
-    }
+#     config = {
+#         "train_path": train_path,
+#         "val_path": val_path,
+#         "model_type": model_type,
+#         "checkpoint": checkpoint,
+#         "convnext_arch": convnext_arch,
+#         "batch_size": batch_size,
+#         "lr": lr,
+#         "n_epochs": n_epochs,
+#         "dropout_1": dp1, 
+#         "dropout_2": dp2, 
+#         "size_of_linear_layer": size_of_linear_layer,
+# #         "n_classes": None,
+#         "convnext_arch": convnext_arch,
+#         "fastai_head": fastai_head,
+#         "stratified_batches": stratified_batches,
+#         "finetune": finetune
+#     }
     
     dls = get_dataloaders(config)
     
@@ -319,11 +383,11 @@ def train(
     
     print(json.dumps(config, indent=4))
     
-    if model_type == 'vicregl':
-        model = get_vicreg_model(checkpoint, config)
+    if config['model_type'] == 'vicregl':
+        model = get_vicreg_model(config)
     else:
         model = timm.create_model(
-            model_type, 
+            config['model_type'], 
             num_classes=config['n_classes'], 
             pretrained=True
         )
@@ -335,16 +399,43 @@ def train(
         cbs=callbacks
     ).to_fp16()
     
-#     res = learn.lr_find()
-#     import pdb;pdb.set_trace()
-# #     1/0
+    if config['model_type'] == 'vicregl':
+        learn.splitter = vicreg_splitter
         
     with learn.distrib_ctx(sync_bn=True, in_notebook=False):
-        learn.fine_tune(n_epochs, lr, freeze_epochs=0 if model_type=='vicregl' else 1)
+        
+#         res = learn.lr_find(start_lr=1e-05, num_it=10)
+#         print(res.valley)
+        
+#         print(learn.summary())
     
+        freeze_epochs = 2
+        if config['model_type'] == 'vicregl' and not config['finetune']:
+            freeze_epochs = 0
+        
+        if config['finetune']:
+            learn.fine_tune(config['n_epochs'], config['lr'], freeze_epochs=freeze_epochs)
+        else:
+            # Train only linear layer
+            
+            # This is from the source of fine_tune
+            base_lr = config['lr']
+            lr_mult = 100
+            pct_start = 0.3
+            div=5.0
+            
+            learn.fit_one_cycle(
+                config['n_epochs'], 
+                base_lr, 
+                pct_start=pct_start, 
+                div=div
+            )
+        
+        root_name = f"{config['outdir']}/{config['run_id']}_{os.path.basename(config['val_path'])}_{config['model_type']}"
+        if config['finetune']:
+            root_name = f"{root_name}_finetune"
+        
         if save_checkpoint:
-
-            root_name = f"{run_id}_{os.path.basename(config['train_path'])}_{model_type}"
             
             # Make confusion matrices
             ci = ClassificationInterpretation.from_learner(learn)
@@ -360,17 +451,22 @@ def train(
             ConfusionMatrixDisplay(c / row_sums_matrix, display_labels=ci.vocab).plot(cmap='Blues', xticks_rotation='vertical', ax=sub)
 
             fig.suptitle(f"Precision\n(accuracy: {acc * 100:.1f} %)")
-            fig.savefig(f"{root_name}_precision.png", bbox_inches='tight')
+            fig.savefig(f"{root_name}_precision_{config['train_fraction']*100}.png", bbox_inches='tight')
 
             # Precision
             fig, sub = plt.subplots()
             ConfusionMatrixDisplay(c / c.sum(axis=0), display_labels=ci.vocab).plot(cmap='Blues', xticks_rotation='vertical', ax=sub)
             fig.suptitle(f"Recall\n(accuracy: {acc * 100:.1f} %)")
-            fig.savefig(f"{root_name}_recall.png", bbox_inches='tight')
+            fig.savefig(f"{root_name}_recall_{config['train_fraction']*100}.png", bbox_inches='tight')
 
         else:
 
             acc = learn.recorder.metrics[0].value.item()
+    
+    with open(f"{config['outdir']}/{config['run_id']}_results.json", "w+") as fp:
+        config['accuracy'] = acc
+        config['n_samples'] = get_items((config['train_path'], config['val_path'], config['train_fraction'])).shape[0]
+        json.dump(config, fp)
     
     if save_checkpoint:
         learn.export(f"{root_name}")
@@ -384,23 +480,44 @@ if __name__ == "__main__":
     from pathlib import Path
 
     parser = argparse.ArgumentParser()
-
+    
+    parser.add_argument("--config", type=Path, help="Configuration file", required=True)
     parser.add_argument('--model', choices=['swin_base_patch4_window7_224_in22k', 'vicregl'], required=True)
     parser.add_argument('--train_data', type=Path, required=True, help="Path to root of Bedrock-like dataset")
+    parser.add_argument('--train-fraction', type=float, default=1, required=False, help="Fraction of training to use")
     parser.add_argument('--val_data', type=Path, required=True, help="Path to root of Bedrock-like dataset")
     parser.add_argument('--arch', choices=['tiny', 'small', 'base', 'large', 'xlarge'], required=False, default='small')
     parser.add_argument('--checkpoint', type=Path, required=False)
+    parser.add_argument('--fix-lr', action='store_true', help="Divide input LR by the number of GPUs")
+    parser.add_argument('--finetune', action='store_true', help="Finetune the entire model")
+    parser.add_argument('--outdir', type=Path, required=True, help="Directory for the outputs")
+    parser.add_argument('--run-id', type=int, required=False, default=0, help="ID of the run (useful for hyperparam searches)")
+
 
     args = parser.parse_args()
         
     if args.model == 'vicregl' and not args.checkpoint:
         raise argparse.ArgumentError(args.checkpoint, '--checkpoint is required when model is vicregl')
-      
+    
+    with open(args.config) as fp:
+        config = json.load(fp)
+    
+    config['train_path'] = str(args.train_data.absolute())
+    config['val_path'] = str(args.val_data.absolute())
+    config['model_type'] = args.model
+    config['checkpoint'] = str(args.checkpoint)
+    config['convnext_arch'] = args.arch
+    config['train_fraction'] = args.train_fraction
+    config['finetune'] = args.finetune
+    config['outdir'] = str(args.outdir.absolute())
+    config['run_id'] = args.run_id
+    
+    # Fix the batch size by dividing it by the number of GPUs
+    if args.fix_lr:
+        print("Multiplying the lr by the number of GPUs")
+        config['lr'] *= torch.cuda.device_count()
+    
     train(
-        str(args.train_data.absolute()), 
-        str(args.val_data.absolute()), 
-        args.model, 
-        args.checkpoint, 
-        args.arch, 
+        config,
         save_checkpoint=True
     )
