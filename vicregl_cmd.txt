@@ -1,0 +1,1 @@
+torchrun --nproc_per_node=4 main_vicregl.py --fp16 --exp-dir /cnvrg/vicregl_exp --arch convnext_small --epochs 100 --batch-size 384 --optimizer adamw --base-lr 0.00075 --alpha 0.75 --evaluate

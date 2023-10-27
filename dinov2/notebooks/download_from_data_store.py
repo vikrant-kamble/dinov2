@@ -32,11 +32,11 @@ gs = GCSStorage(
 ds = DataStore(name="dinov2", storage=gs)
 
 
-# dataset = ds[dataset_name]
+dataset = ds[dataset_name]
 
 
-# dataset.clone(destination)
+dataset.clone(destination)
 
-exp = ds['experiments/scale_mae']
-e = exp.get("laced-universe-9")
-e.clone("/data/laced-universe-9")
+# exp = ds['experiments/scale_mae']
+# e = exp.get("laced-universe-9")
+# e.clone("/data/laced-universe-9")
