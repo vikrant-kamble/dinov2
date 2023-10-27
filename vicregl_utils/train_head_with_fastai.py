@@ -24,6 +24,8 @@ import cv2
 import math
 
 from sklearn.metrics import ConfusionMatrixDisplay
+import sklearn.metrics as skm
+
 import matplotlib.pyplot as plt
 
 import torch.distributed
@@ -458,7 +460,19 @@ def train(
             ConfusionMatrixDisplay(c / c.sum(axis=0), display_labels=ci.vocab).plot(cmap='Blues', xticks_rotation='vertical', ax=sub)
             fig.suptitle(f"Recall\n(accuracy: {acc * 100:.1f} %)")
             fig.savefig(f"{root_name}_recall_{config['train_fraction']*100}.png", bbox_inches='tight')
-
+            
+            # Save details
+            _,targs,decoded = ci.learn.get_preds(dl=ci.dl, with_decoded=True, with_preds=True, with_targs=True, act=ci.act)
+            
+            config['accuracy'] = acc
+            config['n_samples'] = get_items((config['train_path'], config['val_path'], config['train_fraction'])).shape[0]
+            
+            names = [str(v) for v in ci.vocab]
+            classification_report = skm.classification_report(targs, decoded, labels=list(ci.vocab.o2i.values()), target_names=names, output_dict=True)
+            config['report'] = classification_report
+            with open(f"{root}_complete_results.json", "w+") as fp:
+                json.dump(config, fp)
+            
         else:
 
             acc = learn.recorder.metrics[0].value.item()
