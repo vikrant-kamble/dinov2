@@ -1,8 +1,9 @@
 mkdir /cnvrg/output/dino_checkpoint;
 gsutil cp $1 /cnvrg/output/dino_checkpoint/teacher_checkpoint.pth;
 gsutil cp $2 /cnvrg/output/dino_checkpoint/config.yaml;
-pip install fvcore
-pip install xformers==0.0.18
+pip install fvcore;
+pip install xformers==0.0.18;
+pip install neptune;
 python /cnvrg/scripts/dino_embedding_creation.py --data /data/dino_fixed_rg_evaluation_imagenet --config /cnvrg/output/dino_checkpoint/config.yaml --checkpoint /cnvrg/output/dino_checkpoint/teacher_checkpoint.pth --outpath /cnvrg/output/rgevaluation;
 cd /cnvrg/output/rgevaluation/embeddings;
 yes | cnvrgv2 dataset create -n $3;
