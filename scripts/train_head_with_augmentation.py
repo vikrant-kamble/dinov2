@@ -130,6 +130,15 @@ if __name__ == "__main__":
         default=2048
     )
 
+    parser.add_argument(
+        '--transformkind',
+        help='Kind of augmentation used for training',
+        required=False,
+        default="cape"
+    )
+
+
+
 
 
     parser.set_defaults(swap=False)
