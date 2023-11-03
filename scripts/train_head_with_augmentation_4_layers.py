@@ -161,7 +161,7 @@ if __name__ == "__main__":
         cfg = OmegaConf.merge(default_cfg, cfg)
 
         backbone_model = build_model_for_eval(cfg, args.checkpoint, cuda=True)
-        classifier_model = ImageClassifierFull(learning_rate=0.001, backbone_model = backbone_model, embedding_dim=args.embeddingdim,
+        classifier_model = ImageClassifier4Layer(learning_rate=0.001, backbone_model = backbone_model, embedding_dim=args.embeddingdim,
                                        n_classes=data_module.n_classes, weight_decay=args.weightdecay,
                                        dropout=args.dropout, label_smoothing=args.labelsmoothing,
                                        steps_per_epoch=len(data_module.train_dataloader()),
