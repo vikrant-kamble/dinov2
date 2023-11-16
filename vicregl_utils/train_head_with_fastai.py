@@ -568,7 +568,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
     parser.add_argument("--config", type=Path, help="Configuration file", required=True)
-    parser.add_argument('--model', choices=['swin_base_patch4_window7_224_in22k', 'vicregl'], required=True)
+    parser.add_argument('--model', choices=['swin_base_patch4_window7_224_in22k', 'vicregl', 'dinov2'], required=True)
     parser.add_argument('--train_data', type=Path, required=True, help="Path to root of Bedrock-like dataset")
     parser.add_argument('--train-fraction', type=float, default=1, required=False, help="Fraction of training to use")
     parser.add_argument('--val_data', type=Path, required=True, help="Path to root of Bedrock-like dataset")
@@ -582,8 +582,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
         
-    if args.model == 'vicregl' and not args.checkpoint:
-        raise argparse.ArgumentError(args.checkpoint, '--checkpoint is required when model is vicregl')
+    if args.model in ['vicregl', 'dinov2'] and not args.checkpoint:
+        raise argparse.ArgumentError(args.checkpoint, '--checkpoint is required when model is vicregl or dinov2')
     
     with open(args.config) as fp:
         config = json.load(fp)
@@ -602,6 +602,8 @@ if __name__ == "__main__":
     if args.fix_lr:
         print("Multiplying the lr by the number of GPUs")
         config['lr'] *= torch.cuda.device_count()
+    
+    os.makedirs(config['outdir'], exist_ok=True)
     
     train(
         config,
