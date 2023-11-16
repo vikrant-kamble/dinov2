@@ -258,12 +258,16 @@ def get_dataloaders(config):
         dls = dblock.weighted_dataloaders(
             (config['train_path'], config['val_path'], config['train_fraction']),
             batch_size=config['batch_size'], 
-            wgts=wgts
+            wgts=wgts,
+            persistent_workers=True,
+            pin_memory=True
         )
     else:
         dls = dblock.dataloaders(
             (config['train_path'], config['val_path'], config['train_fraction']),
-            batch_size=config['batch_size']
+            batch_size=config['batch_size'],
+            persistent_workers=True,
+            pin_memory=True
         )
     
     return dls
@@ -467,7 +471,11 @@ def train(
         learn.splitter = vicreg_splitter
     elif config['model_type'] == 'dinov2':
         learn.splitter = dinov2_splitter
-        
+    
+    if config['train_fraction'] < 1:
+        print("Renormalizing number of epochs")
+        config['n_epochs'] = int(config['n_epochs'] / config['train_fraction'])
+    
     with learn.distrib_ctx(sync_bn=True, in_notebook=False):
         
 #         res = learn.lr_find(start_lr=1e-05, num_it=10)

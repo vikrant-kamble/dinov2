@@ -15,8 +15,8 @@ from train_head_with_fastai import train
 def objective(trial, config, study_name):
     
 #     batch_size_power = trial.suggest_int("batch_size_power", 7, 10)
-    config['lr'] = trial.suggest_float("lr", 1e-5, 0.1, log=True)
-    config['linear_layer_dropout'] = trial.suggest_float("linear_layer_dropout", 0, 0.7)
+    config['lr'] = trial.suggest_float("lr", 1e-4, 0.03, log=True)
+    config['linear_layer_dropout'] = trial.suggest_float("linear_layer_dropout", 0, 0.5)
 #     n_epochs = trial.suggest_int("n_epochs", 2, 30)
     
 #     config['batch_size'] = 2**batch_size_power
