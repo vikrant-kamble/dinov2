@@ -1,0 +1,10 @@
+test:
+  use: test
+  type: AttrGeomSet
+  mnemonics:
+    - living_area_v3/20220331_cnn_test_all
+    - living_area_v3/20220331_cnn_train_all
+    - pj_living_area_dev_v5/20231115_cubicasa_ortho_survey_id_train
+    - pj_living_area_dev_v5/20231115_cubicasa_ortho_survey_id_validation
+    - pj_living_area_dev_v5/20231115_cubicasa_ortho_survey_id_test
+  sample: 10

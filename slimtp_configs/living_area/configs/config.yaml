@@ -1,0 +1,58 @@
+hydra: # Makes sure that hydra runs the experiment in current directory
+  run:
+    dir: .
+  # the effective configurations are saved in the output_subdir (default .hydra)
+  output_subdir: ${output_directory}/run-configs
+
+defaults:
+  - _self_
+  - datasplits: sanity_check
+
+output_directory: /cnvrg/output
+
+
+### Download prebuilt cache
+download_cache:
+  use: False
+  gcs_path: gs://cape-ml-projects-data/pj_living_area_dev_v5/dev_v5_chips/ortho_ta_mls_cubicasa/cache/cache.lmdb
+
+### Preprocessing configuration
+cache:
+  local_cache_path: /cnvrg/artifacts/cache
+  cloud: True
+
+chipper:
+  chipper_url: https://boston.cape-gcp-staging.com
+  chipper_params:
+    zoom_level: 20
+    padding: 25
+    algorithm: "shower_rotate"
+  concurrency: 100 # 100 [default], number of concurrent tasks to fetch chips
+  rps_limit: null # [optional], max number of requests per second if specified.
+
+
+### Data index file
+# Various formats are supported, determined simply by the file extension.
+# Formats together with a few usage notes are listed in `slimtp.lib.data.write_dataframe`.
+data_index_path: ${output_directory}/preprocessing/data.h5
+
+
+### Taxonomy
+quantile_taxonomy: True
+taxonomy:
+  num_quantiles: ["13"]
+
+
+### Data loading
+size_initial: 224  # scale to this size
+size_final: 224  # crop to this size
+batch_size: 128  # per GPU
+
+# Load config for DinoV2
+dinov2_config: gs://cape-ml-projects-data/data_stores/dinov2/experiments/a100x4/DIN-145/config.yaml
+dinov2_backbone: gs://cape-ml-projects-data/data_stores/dinov2/experiments/a100x4/DIN-145/eval/training_324999/teacher_checkpoint.pth
+dino_v2_config_path: ${output_directory}/training/dinov2_config.yaml
+dino_v2_backbone_path: ${output_directory}/training/dinov2_backbone.pth
+
+# Inference
+tensors_path: ${output_directory}/inference/output_tensors.h5
