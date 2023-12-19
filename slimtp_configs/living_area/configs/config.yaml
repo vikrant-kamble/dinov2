@@ -26,7 +26,7 @@ chipper:
   chipper_params:
     zoom_level: 20
     padding: 25
-    algorithm: "shower_rotate"
+    algorithm: "geo_chipper"
   concurrency: 100 # 100 [default], number of concurrent tasks to fetch chips
   rps_limit: null # [optional], max number of requests per second if specified.
 
