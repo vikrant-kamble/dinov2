@@ -1,10 +1,29 @@
-test:
+ta_mls_train:
+  use: test
+  type: AttrGeomSet
+  mnemonics:
+    - living_area_v3/20220331_cnn_train_all
+
+ta_mls_test:
   use: test
   type: AttrGeomSet
   mnemonics:
     - living_area_v3/20220331_cnn_test_all
-    - living_area_v3/20220331_cnn_train_all
+
+cubicasa_train:
+  use: test
+  type: AttrGeomSet
+  mnemonics:
     - pj_living_area_dev_v5/20231115_cubicasa_ortho_survey_id_train
+
+cubicasa_validation:
+  use: test
+  type: AttrGeomSet
+  mnemonics:
     - pj_living_area_dev_v5/20231115_cubicasa_ortho_survey_id_validation
+
+cubicasa_test:
+  use: test
+  type: AttrGeomSet
+  mnemonics:
     - pj_living_area_dev_v5/20231115_cubicasa_ortho_survey_id_test
-  sample: 10

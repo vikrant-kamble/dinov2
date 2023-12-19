@@ -47,7 +47,7 @@ def run(config):
     amdataset = DinoInferenceDataset(config=config, df=df)
 
     # Create torch dataloader
-    data_loader = DataLoader(amdataset, batch_size=config.batch_size, shuffle=False)
+    data_loader = DataLoader(amdataset, batch_size=config.batch_size, shuffle=False, num_workers=8)
 
     # Download checkpoint model using gstuil
     dino_v2_backbone_path = config.dino_v2_backbone_path
