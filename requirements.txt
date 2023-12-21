@@ -2,4 +2,4 @@ cnvrgv2
 fvcore
 xformers==0.0.18
 neptune
-torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118

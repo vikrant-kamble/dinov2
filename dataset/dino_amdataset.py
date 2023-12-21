@@ -41,6 +41,9 @@ class DinoInferenceDataset:
             ]
         )
 
+    def __len__(self):
+        return len(self.df)
+
     def _load_image(self, item):
         image_bytes = self.cache.get(item["cache_key"])
         image = Image.open(io.BytesIO(image_bytes))

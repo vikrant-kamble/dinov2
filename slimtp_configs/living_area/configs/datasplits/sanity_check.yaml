@@ -4,6 +4,6 @@ test:
   mnemonics:
     # No of rows: 68059
     - living_area_v3/20220331_cnn_test_all
-  sample: 1000
+  sample: 10
   # target_col: gla_sqft
   # TA_col: areabuilding
