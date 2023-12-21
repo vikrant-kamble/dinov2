@@ -11,6 +11,7 @@ from slimtp.lib.common import merge_dict
 from torch import Tensor
 from torchvision import transforms
 
+RESIZE_SIZE = 256
 IMG_SIZE = 224
 
 
@@ -33,6 +34,7 @@ class DinoInferenceDataset:
     def t_clean(self) -> Any:
         return transforms.Compose(
             [
+                transforms.Resize(RESIZE_SIZE, interpolation=transforms.InterpolationMode.BICUBIC),
                 transforms.CenterCrop(IMG_SIZE),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
