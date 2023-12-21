@@ -14,15 +14,8 @@ from slimtp.modules import AMDataset
 from slimtp.pipelines import AMPreprocessing
 from torch.utils.data import DataLoader
 
+from dataset.dino_amdataset import DinoInferenceDataset
 from dinov2.configs import dinov2_default_config
-
-
-class DinoInferenceDataset(AMDataset):
-    def __getitem__(self, index: int):
-        item = self.get_df_data(index)
-        sample_name = item["identifier"]
-        x_clean = self.get_aug_item(item, self.t_clean)
-        return x_clean, sample_name
 
 
 @hydra.main(config_path="../slimtp_configs/living_area/configs", config_name="config")
